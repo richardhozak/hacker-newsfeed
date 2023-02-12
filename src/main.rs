@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 
 use eframe::{
-    egui::{self, CollapsingHeader, Color32, FontId, RichText, TextFormat, TextStyle},
+    egui::{self, CollapsingHeader, Color32, FontId, RichText, Sense, TextFormat, TextStyle},
     epaint::{ahash::HashMap, text::LayoutJob, Vec2},
     CreationContext,
 };
@@ -198,7 +198,8 @@ impl Application {
             });
         }
 
-        ui.label(RichText::new(&story.title).heading().strong());
+        let response = ui.label(RichText::new(&story.title).heading().strong());
+
         ui.horizontal(|ui| {
             ui.label(RichText::new(&story.author).strong());
             ui.label("•");
@@ -211,12 +212,20 @@ impl Application {
                 ui.label("•");
             }
 
-            if ui.link(format_comments(story.comments)).clicked() {
-                action = Some(StoryAction::OpenComments);
-            }
+            ui.add_enabled_ui(story.comments > 0, |ui| {
+                if ui.link(format_comments(story.comments)).clicked() {
+                    action = Some(StoryAction::OpenComments);
+                }
+            });
         });
 
-        if ui.button("Open").clicked() {
+        let response = response.interact(Sense::click());
+
+        if response.hovered() {
+            ui.ctx().output().cursor_icon = egui::CursorIcon::PointingHand;
+        }
+
+        if response.clicked() {
             action = Some(StoryAction::OpenUrl);
         }
 
