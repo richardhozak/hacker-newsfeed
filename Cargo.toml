@@ -1,0 +1,20 @@
+[package]
+name = "hacker-news"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+eframe = "0.20.1"
+egui_extras = { version = "0.20.0", features = ["image"] }
+ehttp = "0.2.0"
+image = { version = "0.24.5", features = ["ico"] }
+poll-promise = "0.2.0"
+rand = "0.8.5"
+serde = { version = "1.0.152", features = ["derive"] }
+serde_json = "1.0.92"
+tap = "1.0.1"
+time = "0.3.17"
+tracing = "0.1.37"
+tracing-subscriber = "0.3.16"
+url = "2.3.1"
+webbrowser = "0.8.7"
