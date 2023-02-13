@@ -69,11 +69,25 @@ struct Application {
     load_amount: Option<usize>,
     story_comments: Option<Story>,
     items: HashMap<usize, Promise<ehttp::Result<HnItem>>>,
+    page: Page,
 }
 
-fn request_topstories(ctx: egui::Context) -> Promise<ehttp::Result<Vec<usize>>> {
+#[derive(Default, Clone, Copy, Debug, PartialEq)]
+enum Page {
+    #[default]
+    Top,
+    New,
+    Show,
+    Ask,
+    Jobs,
+}
+
+fn fetch_url<T>(ctx: egui::Context, url: &str) -> Promise<ehttp::Result<T>>
+where
+    T: serde::de::DeserializeOwned + Send,
+{
     let (sender, promise) = Promise::new();
-    let request = ehttp::Request::get("https://hacker-news.firebaseio.com/v0/topstories.json");
+    let request = ehttp::Request::get(url);
     ehttp::fetch(request, move |response| {
         ctx.request_repaint(); // wake up UI thread
 
@@ -84,39 +98,32 @@ fn request_topstories(ctx: egui::Context) -> Promise<ehttp::Result<Vec<usize>>> 
 
         let response = response.unwrap();
 
-        match serde_json::from_slice::<Vec<usize>>(&response.bytes) {
+        match serde_json::from_slice::<T>(&response.bytes) {
             Ok(value) => sender.send(Ok(value)),
             Err(err) => sender.send(Err(format!("Could not deserialize response: {}", err))),
         }
     });
 
     promise
+}
+
+#[rustfmt::skip]
+fn fetch_page_stories(page: Page, ctx: egui::Context) -> Promise<ehttp::Result<Vec<usize>>> {
+    match page {
+        Page::Top => fetch_url(ctx, "https://hacker-news.firebaseio.com/v0/topstories.json"),
+        Page::New => fetch_url(ctx, "https://hacker-news.firebaseio.com/v0/newstories.json"),
+        Page::Show => fetch_url(ctx, "https://hacker-news.firebaseio.com/v0/showstories.json"),
+        Page::Ask => fetch_url(ctx, "https://hacker-news.firebaseio.com/v0/askstories.json"),
+        Page::Jobs => fetch_url(ctx, "https://hacker-news.firebaseio.com/v0/jobstories.json"),
+    }
 }
 
 fn fetch_item(ctx: egui::Context, item_id: usize) -> Promise<ehttp::Result<HnItem>> {
     // https://hacker-news.firebaseio.com/v0/item/8863.json
-
-    let (sender, promise) = Promise::new();
-    let request = ehttp::Request::get(format!(
-        "https://hacker-news.firebaseio.com/v0/item/{item_id}.json"
-    ));
-    ehttp::fetch(request, move |response| {
-        ctx.request_repaint(); // wake up UI thread
-
-        if let Err(err) = response {
-            sender.send(Err(err));
-            return;
-        }
-
-        let response = response.unwrap();
-
-        match serde_json::from_slice::<HnItem>(&response.bytes) {
-            Ok(value) => sender.send(Ok(value)),
-            Err(err) => sender.send(Err(format!("Could not deserialize response: {}", err))),
-        }
-    });
-
-    promise
+    fetch_url(
+        ctx,
+        &format!("https://hacker-news.firebaseio.com/v0/item/{item_id}.json"),
+    )
 }
 
 fn configure_text_styles(ctx: &egui::Context) {
@@ -180,7 +187,7 @@ impl Application {
         //     })
         // }
 
-        let status = RequestStatus::Loading(request_topstories(cc.egui_ctx.clone()));
+        let status = RequestStatus::Loading(fetch_page_stories(Page::Top, cc.egui_ctx.clone()));
 
         Self {
             status,
@@ -404,6 +411,8 @@ impl eframe::App for Application {
             }
         }
 
+        let old_page = self.page;
+
         let loaded_amount = self.loading_items.as_ref().map(|items| {
             items
                 .iter()
@@ -441,7 +450,8 @@ impl eframe::App for Application {
                 match self.status {
                     RequestStatus::Done(_) | RequestStatus::Error(_) => {
                         if ui.button("Refresh").clicked() {
-                            self.status = RequestStatus::Loading(request_topstories(ctx.clone()));
+                            self.status =
+                                RequestStatus::Loading(fetch_page_stories(self.page, ctx.clone()));
                         }
                     }
                     RequestStatus::Loading(_) => {
@@ -456,6 +466,14 @@ impl eframe::App for Application {
                         items.len()
                     ));
                 }
+            });
+
+            ui.horizontal(|ui| {
+                ui.selectable_value(&mut self.page, Page::Top, "[Top]");
+                ui.selectable_value(&mut self.page, Page::New, "[New]");
+                ui.selectable_value(&mut self.page, Page::Show, "[Show]");
+                ui.selectable_value(&mut self.page, Page::Ask, "[Ask]");
+                ui.selectable_value(&mut self.page, Page::Jobs, "[Jobs]");
             });
         });
 
@@ -525,6 +543,15 @@ impl eframe::App for Application {
 
         if go_back {
             self.story_comments = None;
+        }
+
+        if old_page != self.page {
+            self.load_amount = None;
+            self.stories.clear();
+            self.loading_items = None;
+            self.status = RequestStatus::Loading(fetch_page_stories(self.page, ctx.clone()));
+            self.story_comments = None;
+            ctx.request_repaint();
         }
     }
 }
