@@ -14,6 +14,8 @@ use serde::Deserialize;
 use time::{Duration, OffsetDateTime};
 use url::Url;
 
+mod comment_parser;
+
 #[derive(Clone)]
 struct Story {
     url: Option<Url>,
@@ -283,7 +285,29 @@ impl Application {
                             if comment.deleted {
                                 ui.label("[deleted]");
                             } else {
-                                ui.label(&comment.text);
+                                ui.horizontal_wrapped(|ui| {
+                                    ui.spacing_mut().item_spacing.x = 0.0;
+
+                                    let parser = comment_parser::Parser::new(&comment.text);
+                                    for item in parser {
+                                        match item {
+                                            comment_parser::Item::Escape(c) => {
+                                                ui.label(c.to_string());
+                                            }
+                                            comment_parser::Item::Text(text) => {
+                                                ui.label(text);
+                                            }
+                                            comment_parser::Item::NewLine => {
+                                                ui.label("\n");
+                                            }
+                                            comment_parser::Item::Link(mut url, mut text) => {
+                                                let url = url.to_string();
+                                                let text = text.to_string();
+                                                ui.hyperlink_to(text, url);
+                                            }
+                                        }
+                                    }
+                                });
                             }
                         });
 
