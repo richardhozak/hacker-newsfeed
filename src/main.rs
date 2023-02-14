@@ -5,6 +5,7 @@ use eframe::{
     epaint::{ahash::HashMap, text::LayoutJob, Vec2},
     CreationContext,
 };
+use egui_extras::RetainedImage;
 use poll_promise::Promise;
 use rand::{
     distributions::{Alphanumeric, DistString},
@@ -71,6 +72,7 @@ struct Application {
     load_amount: Option<usize>,
     story_comments: Option<Story>,
     items: HashMap<usize, Promise<ehttp::Result<HnItem>>>,
+    favicons: HashMap<String, Promise<ehttp::Result<RetainedImage>>>,
     page: Page,
 }
 
@@ -126,6 +128,50 @@ fn fetch_item(ctx: egui::Context, item_id: usize) -> Promise<ehttp::Result<HnIte
         ctx,
         &format!("https://hacker-news.firebaseio.com/v0/item/{item_id}.json"),
     )
+}
+
+fn fetch_favicon(ctx: egui::Context, url: &str) -> Promise<ehttp::Result<RetainedImage>> {
+    let (sender, promise) = Promise::new();
+    let request = ehttp::Request::get(url);
+    ehttp::fetch(request, move |response| {
+        ctx.request_repaint(); // wake up UI thread
+
+        if let Err(err) = response {
+            sender.send(Err(err));
+            return;
+        }
+
+        let response = response.unwrap();
+
+        let content_type = response.content_type().unwrap_or_default();
+        let image = if content_type.starts_with("image/") {
+            RetainedImage::from_image_bytes(&response.url, &response.bytes)
+        } else {
+            Err(format!(
+                "Http response contains invalid content type {} expected image",
+                content_type
+            ))
+        };
+
+        sender.send(image);
+    });
+
+    promise
+}
+
+fn get_favicon_url(url: &str) -> Option<String> {
+    if let Ok(mut url) = Url::parse(url) {
+        url.set_query(None);
+        url.set_fragment(None);
+        url.set_path("favicon.ico");
+
+        match url.scheme() {
+            "http" | "https" => Some(url.to_string()),
+            _ => None,
+        }
+    } else {
+        None
+    }
 }
 
 fn configure_text_styles(ctx: &egui::Context) {
@@ -197,12 +243,26 @@ impl Application {
         }
     }
 
-    fn render_story(story: &Story, ui: &mut egui::Ui) -> Option<StoryAction> {
+    fn render_story(&self, story: &Story, ui: &mut egui::Ui) -> Option<StoryAction> {
         let mut action = None;
 
         if let Some(url) = &story.url {
             ui.horizontal(|ui| {
-                ui.label("?");
+                if let Some(promise) = self.favicons.get(&story.item.url) {
+                    if let Some(result) = promise.ready() {
+                        match result {
+                            Ok(image) => {
+                                let height = ui.available_height();
+                                image.show_size(ui, Vec2::new(height, height));
+                            }
+                            Err(_) => {
+                                ui.label("x");
+                            }
+                        }
+                    }
+                } else {
+                    ui.label("?");
+                }
                 ui.label(RichText::new(format_url(url)).monospace());
             });
         }
@@ -451,7 +511,15 @@ impl eframe::App for Application {
                 for promise in &mut *promises {
                     let result = promise.ready().unwrap();
                     match result {
-                        Ok(item) => hn_stories.push(Story::from_hn_item(item)),
+                        Ok(item) => {
+                            hn_stories.push(Story::from_hn_item(item));
+                            if let Some(favicon_url) = get_favicon_url(&item.url) {
+                                self.favicons.insert(
+                                    item.url.to_string(),
+                                    fetch_favicon(ctx.clone(), &favicon_url),
+                                );
+                            }
+                        }
                         Err(error) => {
                             error_message.push_str(&error);
                             error_message.push('\n');
@@ -510,7 +578,7 @@ impl eframe::App for Application {
                 }
 
                 egui::ScrollArea::vertical().show(ui, |ui| {
-                    Application::render_story(story_comments, ui);
+                    self.render_story(story_comments, ui);
 
                     for comment_id in &story_comments.item.kids {
                         self.render_comment(*comment_id, ctx, ui);
@@ -522,7 +590,7 @@ impl eframe::App for Application {
                 RequestStatus::Done(_) => {
                     egui::ScrollArea::vertical().show(ui, |ui| {
                         for story in &self.stories {
-                            if let Some(action) = Application::render_story(story, ui) {
+                            if let Some(action) = self.render_story(story, ui) {
                                 match action {
                                     StoryAction::OpenUrl => {
                                         if let Some(url) = &story.url {
