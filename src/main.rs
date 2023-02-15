@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 
 use eframe::{
-    egui::{self, CollapsingHeader, Color32, FontId, RichText, Sense, TextFormat, TextStyle},
+    egui::{self, CollapsingHeader, Color32, FontId, RichText, TextFormat, TextStyle},
     epaint::{ahash::HashMap, text::LayoutJob, Vec2},
     CreationContext,
 };
@@ -9,6 +9,7 @@ use egui_extras::RetainedImage;
 use poll_promise::Promise;
 use serde::Deserialize;
 use time::OffsetDateTime;
+use tracing::warn;
 use url::Url;
 
 mod comment_parser;
@@ -162,9 +163,30 @@ fn configure_visuals(ctx: &egui::Context) {
 
 // #f6f6ef
 
-enum StoryAction {
-    OpenUrl,
-    OpenComments,
+fn render_html_text(text: &str, ui: &mut egui::Ui) {
+    ui.horizontal_wrapped(|ui| {
+        ui.spacing_mut().item_spacing.x = 0.0;
+
+        let parser = comment_parser::Parser::new(text);
+        for item in parser {
+            match item {
+                comment_parser::Item::Escape(c) => {
+                    ui.label(c.to_string());
+                }
+                comment_parser::Item::Text(text) => {
+                    ui.label(text);
+                }
+                comment_parser::Item::NewLine => {
+                    ui.label("\n");
+                }
+                comment_parser::Item::Link(mut url, mut text) => {
+                    let url = url.to_string();
+                    let text = text.to_string();
+                    ui.hyperlink_to(text, url);
+                }
+            }
+        }
+    });
 }
 
 impl Application {
@@ -190,8 +212,14 @@ impl Application {
         }
     }
 
-    fn render_story(&self, story: &Story, ui: &mut egui::Ui) -> Option<StoryAction> {
-        let mut action = None;
+    fn render_story(
+        &self,
+        story: &Story,
+        ui: &mut egui::Ui,
+        show_text: bool,
+        interactive: bool,
+    ) -> bool {
+        let mut open_comments = false;
 
         if let Some(url) = &story.url {
             ui.horizontal(|ui| {
@@ -213,7 +241,16 @@ impl Application {
             });
         }
 
-        let response = ui.label(RichText::new(&story.title).heading().strong());
+        let title_text = RichText::new(&story.title).heading().strong();
+        let response = if interactive {
+            ui.scope(|ui| {
+                ui.visuals_mut().hyperlink_color = ui.visuals().widgets.active.fg_stroke.color;
+                ui.link(title_text)
+            })
+            .inner
+        } else {
+            ui.label(title_text)
+        };
 
         ui.horizontal(|ui| {
             ui.label(RichText::new(&story.author).strong());
@@ -221,34 +258,34 @@ impl Application {
             ui.label(RichText::new(format_date_time(&story.created)).weak());
         });
 
+        if show_text && story.item.text.len() > 0 {
+            render_html_text(&story.item.text, ui);
+        }
+
         ui.horizontal(|ui| {
             if let Some(points_str) = format_points(story.points) {
                 ui.label(&points_str);
                 ui.label("•");
             }
 
-            ui.add_enabled_ui(story.comments > 0, |ui| {
+            ui.add_enabled_ui(story.comments > 0 && interactive, |ui| {
                 if ui.link(format_comments(story.comments)).clicked() {
-                    action = Some(StoryAction::OpenComments);
+                    open_comments = true;
                 }
             });
         });
 
-        let response = response.interact(Sense::click());
-
-        if response.hovered() {
-            ui.ctx().output().cursor_icon = egui::CursorIcon::PointingHand;
-        }
-
         if response.clicked() {
-            if story.url.is_some() {
-                action = Some(StoryAction::OpenUrl);
+            if let Some(url) = &story.url {
+                if let Err(err) = webbrowser::open(url.as_str()) {
+                    warn!("Could not open webbrowser {}", err);
+                }
             } else {
-                action = Some(StoryAction::OpenComments);
+                open_comments = true;
             }
         }
 
-        action
+        open_comments
     }
 
     fn render_comment(&mut self, comment_id: usize, ctx: &egui::Context, ui: &mut egui::Ui) {
@@ -295,29 +332,7 @@ impl Application {
                             if comment.deleted {
                                 ui.label("[deleted]");
                             } else {
-                                ui.horizontal_wrapped(|ui| {
-                                    ui.spacing_mut().item_spacing.x = 0.0;
-
-                                    let parser = comment_parser::Parser::new(&comment.text);
-                                    for item in parser {
-                                        match item {
-                                            comment_parser::Item::Escape(c) => {
-                                                ui.label(c.to_string());
-                                            }
-                                            comment_parser::Item::Text(text) => {
-                                                ui.label(text);
-                                            }
-                                            comment_parser::Item::NewLine => {
-                                                ui.label("\n");
-                                            }
-                                            comment_parser::Item::Link(mut url, mut text) => {
-                                                let url = url.to_string();
-                                                let text = text.to_string();
-                                                ui.hyperlink_to(text, url);
-                                            }
-                                        }
-                                    }
-                                });
+                                render_html_text(&comment.text, ui);
                             }
                         });
 
@@ -528,7 +543,9 @@ impl eframe::App for Application {
                 }
 
                 egui::ScrollArea::vertical().show(ui, |ui| {
-                    self.render_story(story_comments, ui);
+                    self.render_story(story_comments, ui, true, false);
+
+                    ui.separator();
 
                     for comment_id in &story_comments.item.kids {
                         self.render_comment(*comment_id, ctx, ui);
@@ -540,20 +557,10 @@ impl eframe::App for Application {
                 RequestStatus::Done(_) => {
                     egui::ScrollArea::vertical().show(ui, |ui| {
                         for story in &self.stories {
-                            if let Some(action) = self.render_story(story, ui) {
-                                match action {
-                                    StoryAction::OpenUrl => {
-                                        if let Some(url) = &story.url {
-                                            if let Err(err) = webbrowser::open(url.as_str()) {
-                                                eprintln!("Could not open webbrowser {}", err);
-                                            }
-                                        }
-                                    }
-                                    StoryAction::OpenComments => {
-                                        self.story_comments = Some(story.clone());
-                                    }
-                                }
+                            if self.render_story(story, ui, false, true) {
+                                self.story_comments = Some(story.clone());
                             }
+
                             ui.separator();
                         }
 
