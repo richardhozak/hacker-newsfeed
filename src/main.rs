@@ -334,17 +334,17 @@ impl Application {
                             } else {
                                 render_html_text(&comment.text, ui);
                             }
-                        });
 
-                    egui::Frame::none()
-                        .outer_margin(egui::style::Margin {
-                            left: 20f32,
-                            ..Default::default()
-                        })
-                        .show(ui, |ui| {
-                            for child in &comment.kids {
-                                self.render_comment(*child, ctx, ui);
-                            }
+                            egui::Frame::none()
+                                .outer_margin(egui::style::Margin {
+                                    left: 20f32,
+                                    ..Default::default()
+                                })
+                                .show(ui, |ui| {
+                                    for child in &comment.kids {
+                                        self.render_comment(*child, ctx, ui);
+                                    }
+                                });
                         });
                 }
                 Err(error) => {
