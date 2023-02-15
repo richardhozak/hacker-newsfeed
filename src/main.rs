@@ -241,7 +241,11 @@ impl Application {
         }
 
         if response.clicked() {
-            action = Some(StoryAction::OpenUrl);
+            if story.url.is_some() {
+                action = Some(StoryAction::OpenUrl);
+            } else {
+                action = Some(StoryAction::OpenComments);
+            }
         }
 
         action
