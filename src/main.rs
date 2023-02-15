@@ -16,6 +16,7 @@ use time::{Duration, OffsetDateTime};
 use url::Url;
 
 mod comment_parser;
+mod fetch_favicon;
 
 #[derive(Clone)]
 struct Story {
@@ -74,6 +75,7 @@ struct Application {
     items: HashMap<usize, Promise<ehttp::Result<HnItem>>>,
     favicons: HashMap<String, Promise<ehttp::Result<RetainedImage>>>,
     page: Page,
+    default_icon: Option<RetainedImage>,
 }
 
 #[derive(Default, Clone, Copy, Debug, PartialEq)]
@@ -128,50 +130,6 @@ fn fetch_item(ctx: egui::Context, item_id: usize) -> Promise<ehttp::Result<HnIte
         ctx,
         &format!("https://hacker-news.firebaseio.com/v0/item/{item_id}.json"),
     )
-}
-
-fn fetch_favicon(ctx: egui::Context, url: &str) -> Promise<ehttp::Result<RetainedImage>> {
-    let (sender, promise) = Promise::new();
-    let request = ehttp::Request::get(url);
-    ehttp::fetch(request, move |response| {
-        ctx.request_repaint(); // wake up UI thread
-
-        if let Err(err) = response {
-            sender.send(Err(err));
-            return;
-        }
-
-        let response = response.unwrap();
-
-        let content_type = response.content_type().unwrap_or_default();
-        let image = if content_type.starts_with("image/") {
-            RetainedImage::from_image_bytes(&response.url, &response.bytes)
-        } else {
-            Err(format!(
-                "Http response contains invalid content type {} expected image",
-                content_type
-            ))
-        };
-
-        sender.send(image);
-    });
-
-    promise
-}
-
-fn get_favicon_url(url: &str) -> Option<String> {
-    if let Ok(mut url) = Url::parse(url) {
-        url.set_query(None);
-        url.set_fragment(None);
-        url.set_path("favicon.ico");
-
-        match url.scheme() {
-            "http" | "https" => Some(url.to_string()),
-            _ => None,
-        }
-    } else {
-        None
-    }
 }
 
 fn configure_text_styles(ctx: &egui::Context) {
@@ -237,8 +195,18 @@ impl Application {
 
         let status = RequestStatus::Loading(fetch_page_stories(Page::Top, cc.egui_ctx.clone()));
 
+        let default_icon = RetainedImage::from_image_bytes(
+            "default_icon",
+            include_bytes!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/assets/default_icon.png" // https://icons8.com/icon/NyuxPErq0tu2/globe-africa
+            )),
+        )
+        .unwrap();
+
         Self {
             status,
+            default_icon: Some(default_icon),
             ..Default::default()
         }
     }
@@ -250,15 +218,14 @@ impl Application {
             ui.horizontal(|ui| {
                 if let Some(promise) = self.favicons.get(&story.item.url) {
                     if let Some(result) = promise.ready() {
-                        match result {
-                            Ok(image) => {
-                                let height = ui.available_height();
-                                image.show_size(ui, Vec2::new(height, height));
-                            }
-                            Err(_) => {
-                                ui.label("x");
-                            }
-                        }
+                        let image = result
+                            .as_ref()
+                            .ok()
+                            .unwrap_or_else(|| self.default_icon.as_ref().unwrap());
+                        let height = ui.available_height();
+                        image.show_size(ui, Vec2::new(height, height));
+                    } else {
+                        ui.spinner();
                     }
                 } else {
                     ui.label("?");
@@ -513,10 +480,10 @@ impl eframe::App for Application {
                     match result {
                         Ok(item) => {
                             hn_stories.push(Story::from_hn_item(item));
-                            if let Some(favicon_url) = get_favicon_url(&item.url) {
+                            if !item.url.is_empty() {
                                 self.favicons.insert(
                                     item.url.to_string(),
-                                    fetch_favicon(ctx.clone(), &favicon_url),
+                                    fetch_favicon::fetch_favicon(ctx.clone(), &item.url),
                                 );
                             }
                         }
