@@ -7,12 +7,8 @@ use eframe::{
 };
 use egui_extras::RetainedImage;
 use poll_promise::Promise;
-use rand::{
-    distributions::{Alphanumeric, DistString},
-    thread_rng, Rng,
-};
 use serde::Deserialize;
-use time::{Duration, OffsetDateTime};
+use time::OffsetDateTime;
 use url::Url;
 
 mod comment_parser;
@@ -175,23 +171,6 @@ impl Application {
     fn new(cc: &CreationContext) -> Self {
         configure_visuals(&cc.egui_ctx);
         configure_text_styles(&cc.egui_ctx);
-
-        // let mut stories = Vec::new();
-        // for _ in 0..20 {
-        //     stories.push(Story {
-        //         url: if thread_rng().gen_bool(0.5) {
-        //             Some(Url::parse("https://www.google.com").unwrap())
-        //         } else {
-        //             None
-        //         },
-        //         title: Alphanumeric.sample_string(&mut rand::thread_rng(), 16),
-        //         author: Alphanumeric.sample_string(&mut rand::thread_rng(), 8),
-        //         created: OffsetDateTime::now_utc()
-        //             - Duration::hours(thread_rng().gen_range(0..=66)),
-        //         points: thread_rng().gen_range(0..666),
-        //         comments: thread_rng().gen_range(0..42),
-        //     })
-        // }
 
         let status = RequestStatus::Loading(fetch_page_stories(Page::Top, cc.egui_ctx.clone()));
 
