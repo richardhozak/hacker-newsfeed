@@ -31,19 +31,25 @@ pub(crate) fn fetch_favicon(
         ehttp::fetch(request, move |response| {
             if let Ok(response) = response {
                 let content_type = response.content_type().unwrap_or_default();
-                if content_type.starts_with("image/") {
-                    match RetainedImage::from_image_bytes(&response.url, &response.bytes) {
-                        Ok(image) => {
-                            ctx.request_repaint(); // wake up UI thread, we have icon to re-render
-                            sender.send(Ok(image));
-                            return;
-                        }
-                        Err(error) => {
-                            warn!(
-                                "Could not read image: {} (content-type {}) from url {}",
-                                error, content_type, response.url
-                            );
-                        }
+                let image_result = if content_type.starts_with("image/svg") {
+                    RetainedImage::from_svg_bytes(&response.url, &response.bytes)
+                } else if content_type.starts_with("image/") {
+                    RetainedImage::from_image_bytes(&response.url, &response.bytes)
+                } else {
+                    Err("Invalid content type".to_string())
+                };
+
+                match image_result {
+                    Ok(image) => {
+                        ctx.request_repaint(); // wake up UI thread, we have icon to re-render
+                        sender.send(Ok(image));
+                        return;
+                    }
+                    Err(error) => {
+                        warn!(
+                            "Could not read image: {} (content-type {}) from url {}",
+                            error, content_type, response.url
+                        );
                     }
                 }
             }
