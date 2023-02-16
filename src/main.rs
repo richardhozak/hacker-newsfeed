@@ -199,6 +199,7 @@ impl Application {
         Self {
             status,
             default_icon: Some(default_icon),
+            render_html: true,
             ..Default::default()
         }
     }
