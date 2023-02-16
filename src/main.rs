@@ -605,7 +605,7 @@ impl eframe::App for Application {
     }
 }
 
-fn main() {
+fn main() -> Result<(), eframe::Error> {
     // Log to stdout (if you run with `RUST_LOG=debug`).
     tracing_subscriber::fmt::init();
 
@@ -615,5 +615,5 @@ fn main() {
         "Hacker News",
         native_options,
         Box::new(|cc| Box::new(Application::new(cc))),
-    );
+    )
 }
