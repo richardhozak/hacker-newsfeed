@@ -6,19 +6,31 @@ pub enum Item<'a> {
     Link(Parser<'a>, Parser<'a>),
 }
 
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Default)]
+pub struct TextStyle {
+    pub italic: bool,
+    pub monospace: bool,
+}
+
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub struct Parser<'a> {
     s: &'a str,
+    style: TextStyle,
+    last_was_newline: bool,
 }
 
 impl<'a> Parser<'a> {
     pub fn new(input: &'a str) -> Self {
-        Self { s: input }
+        Self {
+            s: input,
+            style: Default::default(),
+            last_was_newline: false,
+        }
     }
 
     pub fn to_string(&mut self) -> String {
         let mut string = String::new();
-        for item in self {
+        for (item, _) in self {
             match item {
                 Item::Escape(ch) => string.push(ch),
                 Item::Text(text) => string.push_str(text),
@@ -28,6 +40,19 @@ impl<'a> Parser<'a> {
         }
 
         string
+    }
+
+    fn return_item_or_next(&mut self, item: Item<'a>) -> Option<(Item<'a>, TextStyle)> {
+        // Do not allow sending multiple new lines
+        // and decorate item with current style.
+
+        match (self.last_was_newline, item) {
+            (true, Item::NewLine) => return self.next(),
+            (_, item) => {
+                self.last_was_newline = matches!(item, Item::NewLine);
+                return Some((item, self.style));
+            }
+        }
     }
 }
 
@@ -49,12 +74,50 @@ fn find_first_of(haystack: &str, needles: &[&str]) -> Option<usize> {
 }
 
 impl<'a> Iterator for Parser<'a> {
-    type Item = Item<'a>;
+    type Item = (Item<'a>, TextStyle);
 
     fn next(&mut self) -> Option<Self::Item> {
         loop {
             if self.s.is_empty() {
                 return None;
+            }
+
+            if self.s.starts_with("<i>") {
+                self.style.italic = true;
+                self.s = &self.s["<i>".len()..];
+                continue;
+            }
+
+            if self.s.starts_with("</i>") {
+                self.style.italic = false;
+                self.s = &self.s["</i>".len()..];
+                continue;
+            }
+
+            if self.s.starts_with("<pre>") {
+                // <pre> contains preformatted monospace text and is also block
+                // element, meaning we should put it on its own line
+                self.style.monospace = true;
+                self.s = &self.s["<pre>".len()..];
+                return self.return_item_or_next(Item::NewLine);
+            }
+
+            if self.s.starts_with("</pre>") {
+                self.style.monospace = false;
+                self.s = &self.s["</pre>".len()..];
+                return self.return_item_or_next(Item::NewLine);
+            }
+
+            if self.s.starts_with("<code>") {
+                self.style.monospace = true;
+                self.s = &self.s["<code>".len()..];
+                continue;
+            }
+
+            if self.s.starts_with("</code>") {
+                self.style.monospace = false;
+                self.s = &self.s["</code>".len()..];
+                continue;
             }
 
             if self.s.starts_with("&#") {
@@ -79,7 +142,7 @@ impl<'a> Iterator for Parser<'a> {
                         if num != 0 {
                             if let Some(ch) = char::from_u32(num) {
                                 self.s = &self.s[index + 1..];
-                                return Some(Item::Escape(ch));
+                                return self.return_item_or_next(Item::Escape(ch));
                             }
                         }
                     }
@@ -88,17 +151,17 @@ impl<'a> Iterator for Parser<'a> {
 
             if self.s.starts_with("<p>") {
                 self.s = &self.s[3..];
-                return Some(Item::NewLine);
+                return self.return_item_or_next(Item::NewLine);
             }
 
             if self.s.starts_with("&quot;") {
                 self.s = &self.s["&quot;".len()..];
-                return Some(Item::Escape('"'));
+                return self.return_item_or_next(Item::Escape('"'));
             }
 
             if self.s.starts_with("&gt;") {
                 self.s = &self.s["&gt;".len()..];
-                return Some(Item::Escape('>'));
+                return self.return_item_or_next(Item::Escape('>'));
             }
 
             if self.s.starts_with("<a href=\"") {
@@ -111,18 +174,35 @@ impl<'a> Iterator for Parser<'a> {
                         if let Some(link_end) = next_s.find("</a>") {
                             let text_str = &next_s[..link_end];
                             self.s = &next_s[link_end + "</a>".len()..];
-                            return Some(Item::Link(Parser::new(url_str), Parser::new(text_str)));
+                            return self.return_item_or_next(Item::Link(
+                                Parser::new(url_str),
+                                Parser::new(text_str),
+                            ));
                         }
                     }
                 }
             }
 
-            let remainder =
-                &self.s[..find_first_of(self.s, &["&#", "<p>", "&gt;", "&quot;", "<a href=\""])
-                    .unwrap_or(self.s.len())];
+            let remainder = &self.s[..find_first_of(
+                self.s,
+                &[
+                    "&#",
+                    "<p>",
+                    "&gt;",
+                    "&quot;",
+                    "<a href=\"",
+                    "<i>",
+                    "</i>",
+                    "<pre>",
+                    "</pre>",
+                    "<code>",
+                    "</code>",
+                ],
+            )
+            .unwrap_or(self.s.len())];
             if remainder.len() > 0 {
                 self.s = &self.s[remainder.len()..];
-                return Some(Item::Text(remainder));
+                return self.return_item_or_next(Item::Text(remainder));
             }
 
             return None;
@@ -138,7 +218,10 @@ mod tests {
     fn parses_single_escape_with_x() {
         let input = "&#x27;";
         let mut parser = Parser::new(input);
-        assert_eq!(parser.next(), Some(Item::Escape('\'')));
+        assert_eq!(
+            parser.next(),
+            Some((Item::Escape('\''), Default::default()))
+        );
         assert_eq!(parser.next(), None);
     }
 
@@ -146,7 +229,10 @@ mod tests {
     fn parses_single_escape_without_x() {
         let input = "&#27;";
         let mut parser = Parser::new(input);
-        assert_eq!(parser.next(), Some(Item::Escape('\'')));
+        assert_eq!(
+            parser.next(),
+            Some((Item::Escape('\''), Default::default()))
+        );
         assert_eq!(parser.next(), None);
     }
 
@@ -154,7 +240,10 @@ mod tests {
     fn parses_text_only() {
         let input = " Hello world ";
         let mut parser = Parser::new(input);
-        assert_eq!(parser.next(), Some(Item::Text(" Hello world ")));
+        assert_eq!(
+            parser.next(),
+            Some((Item::Text(" Hello world "), Default::default()))
+        );
         assert_eq!(parser.next(), None);
     }
 
@@ -162,9 +251,15 @@ mod tests {
     fn parses_text_and_escape() {
         let input = "It&#x27;s a me Mario!";
         let mut parser = Parser::new(input);
-        assert_eq!(parser.next(), Some(Item::Text("It")));
-        assert_eq!(parser.next(), Some(Item::Escape('\'')));
-        assert_eq!(parser.next(), Some(Item::Text("s a me Mario!")));
+        assert_eq!(parser.next(), Some((Item::Text("It"), Default::default())));
+        assert_eq!(
+            parser.next(),
+            Some((Item::Escape('\''), Default::default()))
+        );
+        assert_eq!(
+            parser.next(),
+            Some((Item::Text("s a me Mario!"), Default::default()))
+        );
         assert_eq!(parser.next(), None);
     }
 
@@ -176,7 +271,46 @@ mod tests {
             Parser::new("https:&#x2F;&#x2F;www.vaultree.com&#x2F;how-it-works&#x2F;"),
         );
         let mut parser = Parser::new(input);
-        assert_eq!(parser.next(), Some(expected));
+        assert_eq!(parser.next(), Some((expected, Default::default())));
+        assert_eq!(parser.next(), None);
+    }
+
+    #[test]
+    fn has_italics() {
+        let input = r#"<i>hello</i><p><i>there</i><p>general kenobi"#;
+        let mut parser = Parser::new(input);
+
+        assert_eq!(
+            parser.next(),
+            Some((
+                Item::Text("hello"),
+                TextStyle {
+                    italic: true,
+                    ..Default::default()
+                }
+            ))
+        );
+
+        assert_eq!(parser.next(), Some((Item::NewLine, Default::default())));
+
+        assert_eq!(
+            parser.next(),
+            Some((
+                Item::Text("there"),
+                TextStyle {
+                    italic: true,
+                    ..Default::default()
+                }
+            ))
+        );
+
+        assert_eq!(parser.next(), Some((Item::NewLine, Default::default())));
+
+        assert_eq!(
+            parser.next(),
+            Some((Item::Text("general kenobi"), Default::default()))
+        );
+
         assert_eq!(parser.next(), None);
     }
 }

@@ -163,18 +163,32 @@ fn configure_visuals(ctx: &egui::Context) {
 
 // #f6f6ef
 
+fn rich_text_with_style(text: impl Into<String>, style: &comment_parser::TextStyle) -> RichText {
+    let mut rich_text = RichText::new(text);
+
+    if style.italic {
+        rich_text = rich_text.italics();
+    }
+
+    if style.monospace {
+        rich_text = rich_text.monospace();
+    }
+
+    rich_text
+}
+
 fn render_html_text(text: &str, ui: &mut egui::Ui) {
     ui.horizontal_wrapped(|ui| {
         ui.spacing_mut().item_spacing.x = 0.0;
 
         let parser = comment_parser::Parser::new(text);
-        for item in parser {
+        for (item, style) in parser {
             match item {
                 comment_parser::Item::Escape(c) => {
-                    ui.label(c.to_string());
+                    ui.label(rich_text_with_style(c.to_string(), &style));
                 }
                 comment_parser::Item::Text(text) => {
-                    ui.label(text);
+                    ui.label(rich_text_with_style(text, &style));
                 }
                 comment_parser::Item::NewLine => {
                     ui.label("\n");
@@ -182,7 +196,7 @@ fn render_html_text(text: &str, ui: &mut egui::Ui) {
                 comment_parser::Item::Link(mut url, mut text) => {
                     let url = url.to_string();
                     let text = text.to_string();
-                    ui.hyperlink_to(text, url);
+                    ui.hyperlink_to(rich_text_with_style(text, &style), url);
                 }
             }
         }
