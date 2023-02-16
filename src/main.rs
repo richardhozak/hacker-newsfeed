@@ -73,6 +73,9 @@ struct Application {
     favicons: HashMap<String, Promise<ehttp::Result<RetainedImage>>>,
     page: Page,
     default_icon: Option<RetainedImage>,
+    render_html: bool,
+    show_debug_window: bool,
+    text_input: String,
 }
 
 #[derive(Default, Clone, Copy, Debug, PartialEq)]
@@ -177,32 +180,6 @@ fn rich_text_with_style(text: impl Into<String>, style: &comment_parser::TextSty
     rich_text
 }
 
-fn render_html_text(text: &str, ui: &mut egui::Ui) {
-    ui.horizontal_wrapped(|ui| {
-        ui.spacing_mut().item_spacing.x = 0.0;
-
-        let parser = comment_parser::Parser::new(text);
-        for (item, style) in parser {
-            match item {
-                comment_parser::Item::Escape(c) => {
-                    ui.label(rich_text_with_style(c.to_string(), &style));
-                }
-                comment_parser::Item::Text(text) => {
-                    ui.label(rich_text_with_style(text, &style));
-                }
-                comment_parser::Item::NewLine => {
-                    ui.label("\n");
-                }
-                comment_parser::Item::Link(mut url, mut text) => {
-                    let url = url.to_string();
-                    let text = text.to_string();
-                    ui.hyperlink_to(rich_text_with_style(text, &style), url);
-                }
-            }
-        }
-    });
-}
-
 impl Application {
     fn new(cc: &CreationContext) -> Self {
         configure_visuals(&cc.egui_ctx);
@@ -224,6 +201,37 @@ impl Application {
             default_icon: Some(default_icon),
             ..Default::default()
         }
+    }
+
+    fn render_html_text(&self, text: &str, ui: &mut egui::Ui) {
+        if !self.render_html {
+            ui.label(text);
+            return;
+        }
+
+        ui.horizontal_wrapped(|ui| {
+            ui.spacing_mut().item_spacing.x = 0.0;
+
+            let parser = comment_parser::Parser::new(text);
+            for (item, style) in parser {
+                match item {
+                    comment_parser::Item::Escape(c) => {
+                        ui.label(rich_text_with_style(c.to_string(), &style));
+                    }
+                    comment_parser::Item::Text(text) => {
+                        ui.label(rich_text_with_style(text, &style));
+                    }
+                    comment_parser::Item::NewLine => {
+                        ui.label("\n");
+                    }
+                    comment_parser::Item::Link(mut url, mut text) => {
+                        let url = url.to_string();
+                        let text = text.to_string();
+                        ui.hyperlink_to(rich_text_with_style(text, &style), url);
+                    }
+                }
+            }
+        });
     }
 
     fn render_story(
@@ -273,7 +281,7 @@ impl Application {
         });
 
         if show_text && story.item.text.len() > 0 {
-            render_html_text(&story.item.text, ui);
+            self.render_html_text(&story.item.text, ui);
         }
 
         ui.horizontal(|ui| {
@@ -346,7 +354,13 @@ impl Application {
                             if comment.deleted {
                                 ui.label("[deleted]");
                             } else {
-                                render_html_text(&comment.text, ui);
+                                if !self.render_html {
+                                    if ui.small_button("Copy").clicked() {
+                                        ui.output_mut(|o| o.copied_text = comment.text.to_string());
+                                    }
+                                }
+
+                                self.render_html_text(&comment.text, ui);
                             }
 
                             egui::Frame::none()
@@ -537,6 +551,10 @@ impl eframe::App for Application {
                         items.len()
                     ));
                 }
+
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.toggle_value(&mut self.show_debug_window, "Debug");
+                });
             });
 
             ui.horizontal(|ui| {
@@ -603,6 +621,41 @@ impl eframe::App for Application {
                 }
             });
         }
+
+        let mut show_debug_window = self.show_debug_window;
+
+        egui::Window::new("Debug")
+            .open(&mut show_debug_window)
+            .resizable(true)
+            .scroll2([true, true])
+            .default_width(500.0)
+            .default_height(600.0)
+            .show(ctx, |ui| {
+                let mut debug_on_hover = ctx.style().debug.debug_on_hover;
+                if ui.checkbox(&mut debug_on_hover, "Debug on hover").changed() {
+                    let mut style = (*ctx.style()).clone();
+                    style.debug.debug_on_hover = debug_on_hover;
+                    ctx.set_style(style);
+                }
+
+                ui.checkbox(
+                    &mut self.render_html,
+                    "Render Html in story text and comments",
+                );
+
+                ui.separator();
+
+                ui.label("Input Html text to render");
+                ui.add(
+                    egui::TextEdit::multiline(&mut self.text_input)
+                        .code_editor()
+                        .desired_width(f32::INFINITY),
+                );
+
+                self.render_html_text(&self.text_input, ui);
+            });
+
+        self.show_debug_window = show_debug_window;
 
         if go_back {
             self.story_comments = None;
