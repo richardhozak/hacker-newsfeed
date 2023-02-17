@@ -240,9 +240,16 @@ impl Application {
         story: &Story,
         ui: &mut egui::Ui,
         show_text: bool,
-        interactive: bool,
+        can_open_comments: bool,
     ) -> bool {
-        let mut open_comments = false;
+        enum Intent {
+            OpenComments,
+            OpenLink,
+        }
+
+        let comment_link_enabled = story.comments > 0 && can_open_comments;
+        let link_enabled = story.url.is_some() || comment_link_enabled;
+        let mut intent = None;
 
         if let Some(url) = &story.url {
             ui.horizontal(|ui| {
@@ -265,14 +272,15 @@ impl Application {
         }
 
         let title_text = RichText::new(&story.title).heading().strong();
-        let response = if interactive {
+        if link_enabled {
             ui.scope(|ui| {
                 ui.visuals_mut().hyperlink_color = ui.visuals().widgets.active.fg_stroke.color;
-                ui.link(title_text)
-            })
-            .inner
+                if ui.link(title_text).clicked() {
+                    intent = Some(Intent::OpenLink);
+                }
+            });
         } else {
-            ui.label(title_text)
+            ui.label(title_text);
         };
 
         ui.horizontal(|ui| {
@@ -291,24 +299,25 @@ impl Application {
                 ui.label("•");
             }
 
-            ui.add_enabled_ui(story.comments > 0 && interactive, |ui| {
+            ui.add_enabled_ui(comment_link_enabled, |ui| {
                 if ui.link(format_comments(story.comments)).clicked() {
-                    open_comments = true;
+                    intent = Some(Intent::OpenComments);
                 }
             });
         });
 
-        if response.clicked() {
-            if let Some(url) = &story.url {
-                if let Err(err) = webbrowser::open(url.as_str()) {
-                    warn!("Could not open webbrowser {}", err);
-                }
-            } else {
-                open_comments = true;
+        // If there is url set and the intent is to open the link then open the url
+        // otherwise if whatever intent is set meaning we are able to interact, then
+        // open comments, this is so stories without url open comment section when
+        // they click the title
+        match (&story.url, intent) {
+            (Some(url), Some(Intent::OpenLink)) => {
+                ui.output_mut(|o| o.open_url(url));
+                false
             }
+            (_, Some(_)) => true,
+            _ => false,
         }
-
-        open_comments
     }
 
     fn render_comment(&mut self, comment_id: usize, ctx: &egui::Context, ui: &mut egui::Ui) {
