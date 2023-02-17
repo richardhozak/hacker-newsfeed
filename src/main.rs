@@ -1,7 +1,10 @@
 #![allow(dead_code)]
 
 use eframe::{
-    egui::{self, CollapsingHeader, Color32, FontId, RichText, TextFormat, TextStyle},
+    egui::{
+        self, CollapsingHeader, Color32, FontId, Key, KeyboardShortcut, Modifiers, RichText,
+        TextFormat, TextStyle,
+    },
     epaint::{ahash::HashMap, text::LayoutJob, Vec2},
     CreationContext,
 };
@@ -9,11 +12,13 @@ use egui_extras::RetainedImage;
 use poll_promise::Promise;
 use serde::Deserialize;
 use time::OffsetDateTime;
-use tracing::warn;
 use url::Url;
 
 mod comment_parser;
 mod fetch_favicon;
+
+pub const DEBUG_SHORTCUT: KeyboardShortcut = KeyboardShortcut::new(Modifiers::NONE, Key::F12);
+pub const REFRESH_SHORTCUT: KeyboardShortcut = KeyboardShortcut::new(Modifiers::NONE, Key::F5);
 
 #[derive(Clone)]
 struct Story {
@@ -395,6 +400,10 @@ impl Application {
 
         self.items.insert(comment_id, promise);
     }
+
+    fn refresh(&mut self, ctx: &egui::Context) {
+        self.status = RequestStatus::Loading(fetch_page_stories(self.page, ctx.clone()));
+    }
 }
 
 fn format_date_time(date_time: &OffsetDateTime) -> String {
@@ -464,6 +473,14 @@ impl Default for RequestStatus {
 
 impl eframe::App for Application {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        if ctx.input_mut(|i| i.consume_shortcut(&DEBUG_SHORTCUT)) {
+            self.show_debug_window = !self.show_debug_window;
+        }
+
+        if ctx.input_mut(|i| i.consume_shortcut(&REFRESH_SHORTCUT)) {
+            self.refresh(&ctx);
+        }
+
         self.status = match std::mem::take(&mut self.status) {
             RequestStatus::Done(items) => RequestStatus::Done(items),
             RequestStatus::Loading(mut promise) => {
@@ -542,37 +559,32 @@ impl eframe::App for Application {
             ui.horizontal(|ui| {
                 ui.heading(RichText::new("Hacker News").strong());
 
-                match self.status {
-                    RequestStatus::Done(_) | RequestStatus::Error(_) => {
-                        if ui.button("Refresh").clicked() {
-                            self.status =
-                                RequestStatus::Loading(fetch_page_stories(self.page, ctx.clone()));
-                        }
-                    }
-                    RequestStatus::Loading(_) => {
-                        ui.spinner();
-                    }
-                }
-
-                if let Some(items) = &self.loading_items {
-                    ui.label(format!(
-                        "loaded {}/{}",
-                        loaded_amount.unwrap_or(0),
-                        items.len()
-                    ));
-                }
-
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.toggle_value(&mut self.show_debug_window, "Debug");
-                });
-            });
-
-            ui.horizontal(|ui| {
                 ui.selectable_value(&mut self.page, Page::Top, "[Top]");
                 ui.selectable_value(&mut self.page, Page::New, "[New]");
                 ui.selectable_value(&mut self.page, Page::Show, "[Show]");
                 ui.selectable_value(&mut self.page, Page::Ask, "[Ask]");
                 ui.selectable_value(&mut self.page, Page::Jobs, "[Jobs]");
+
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    match self.status {
+                        RequestStatus::Done(_) | RequestStatus::Error(_) => {
+                            if ui.button("⟳").clicked() {
+                                self.refresh(&ctx);
+                            }
+                        }
+                        RequestStatus::Loading(_) => {
+                            ui.spinner();
+                        }
+                    }
+
+                    if let Some(items) = &self.loading_items {
+                        ui.label(format!(
+                            "Loaded {}/{}",
+                            loaded_amount.unwrap_or(0),
+                            items.len()
+                        ));
+                    }
+                });
             });
         });
 
