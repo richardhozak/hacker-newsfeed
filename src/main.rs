@@ -579,7 +579,8 @@ impl eframe::App for Application {
         self.load_missing_icons(ctx);
         self.load_missing_comments_for_opened_story(ctx);
 
-        let loading_any_items = self.item_cache.iter().any(|(_, p)| p.ready().is_none());
+        let loading = matches!(self.page_status, RequestStatus::Loading(_))
+            || self.item_cache.iter().any(|(_, p)| p.ready().is_none());
         let loading_stories = if let RequestStatus::Done(item_ids) = &self.page_status {
             self.displayed_page_stories(item_ids).any(|id| {
                 self.item_cache
@@ -612,7 +613,7 @@ impl eframe::App for Application {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     let size = ui.available_height() * 0.6;
 
-                    match (&self.page_status, loading_any_items) {
+                    match (&self.page_status, loading) {
                         (RequestStatus::Done(_) | RequestStatus::Error(_), false) => {
                             if ui
                                 .add_sized(
@@ -653,6 +654,12 @@ impl eframe::App for Application {
             });
         });
 
+        egui::TopBottomPanel::bottom("footer").show(ctx, |ui| {
+            if loading {
+                ui.label("Loading...");
+            }
+        });
+
         egui::CentralPanel::default().show(ctx, |ui| {
             egui::ScrollArea::vertical().show(ui, |ui| {
                 if let Some(story_id) = self.display_comments_for_story {
@@ -680,7 +687,7 @@ impl eframe::App for Application {
 
                             ui.vertical_centered(|ui| {
                                 if ui
-                                    .add_enabled(!loading_any_items, egui::Button::new("Load More"))
+                                    .add_enabled(!loading, egui::Button::new("Load More"))
                                     .clicked()
                                 {
                                     self.page_number += 1;
@@ -695,9 +702,7 @@ impl eframe::App for Application {
                                 }
                             });
                         }
-                        _ => {
-                            ui.label("Loading...");
-                        }
+                        _ => {}
                     }
                 }
             });
