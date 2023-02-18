@@ -78,6 +78,7 @@ struct Application {
     favicons: HashMap<String, Promise<ehttp::Result<RetainedImage>>>,
     page: Page,
     default_icon: Option<RetainedImage>,
+    y_icon: Option<RetainedImage>,
     render_html: bool,
     show_debug_window: bool,
     text_input: String,
@@ -145,7 +146,7 @@ fn configure_text_styles(ctx: &egui::Context) {
         (TextStyle::Small, FontId::new(8.0, Proportional)),
         (TextStyle::Body, FontId::new(16.0, Proportional)),
         (TextStyle::Monospace, FontId::new(12.0, Monospace)),
-        (TextStyle::Button, FontId::new(12.0, Proportional)),
+        (TextStyle::Button, FontId::new(14.0, Proportional)),
         (TextStyle::Heading, FontId::new(22.0, Proportional)),
     ]
     .into();
@@ -154,6 +155,8 @@ fn configure_text_styles(ctx: &egui::Context) {
 
 fn configure_visuals(ctx: &egui::Context) {
     let mut visuals = egui::Visuals::light();
+
+    const HN_ORANGE: Color32 = Color32::from_rgb(0xff, 0x6d, 0x00);
 
     // #f6f6ef
 
@@ -166,10 +169,15 @@ fn configure_visuals(ctx: &egui::Context) {
     // the background of scrollbar behind the handle
     visuals.extreme_bg_color = Color32::from_rgb(0xf6, 0xf6, 0xef);
 
+    // hacker news orange color
+    visuals.hyperlink_color = HN_ORANGE;
+
+    // colors when selectable_value is selected
+    visuals.selection.bg_fill = HN_ORANGE;
+    visuals.selection.stroke.color = Color32::WHITE;
+
     ctx.set_visuals(visuals);
 }
-
-// #f6f6ef
 
 fn rich_text_with_style(text: impl Into<String>, style: &comment_parser::TextStyle) -> RichText {
     let mut rich_text = RichText::new(text);
@@ -201,9 +209,16 @@ impl Application {
         )
         .unwrap();
 
+        let y_icon = RetainedImage::from_image_bytes(
+            "y_icon",
+            include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/assets/y_icon.png")),
+        )
+        .unwrap();
+
         Self {
             status,
             default_icon: Some(default_icon),
+            y_icon: Some(y_icon),
             render_html: true,
             ..Default::default()
         }
@@ -557,32 +572,38 @@ impl eframe::App for Application {
 
         egui::TopBottomPanel::top("top_menu_panel").show(ctx, |ui| {
             ui.horizontal(|ui| {
+                ui.spacing_mut().button_padding = Vec2::splat(5.0);
+
+                self.y_icon.as_ref().unwrap().show(ui);
+
                 ui.heading(RichText::new("Hacker News").strong());
 
-                ui.selectable_value(&mut self.page, Page::Top, "[Top]");
-                ui.selectable_value(&mut self.page, Page::New, "[New]");
-                ui.selectable_value(&mut self.page, Page::Show, "[Show]");
-                ui.selectable_value(&mut self.page, Page::Ask, "[Ask]");
-                ui.selectable_value(&mut self.page, Page::Jobs, "[Jobs]");
+                ui.add_space(10.0);
+
+                ui.selectable_value(&mut self.page, Page::Top, "Top");
+                ui.selectable_value(&mut self.page, Page::New, "New");
+                ui.selectable_value(&mut self.page, Page::Show, "Show");
+                ui.selectable_value(&mut self.page, Page::Ask, "Ask");
+                ui.selectable_value(&mut self.page, Page::Jobs, "Jobs");
 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    let size = ui.available_height() * 0.6;
+
                     match self.status {
                         RequestStatus::Done(_) | RequestStatus::Error(_) => {
-                            if ui.button("⟳").clicked() {
+                            if ui
+                                .add_sized(
+                                    [size, size],
+                                    egui::Button::new(RichText::new("⟳").size(size * 0.6)),
+                                )
+                                .clicked()
+                            {
                                 self.refresh(&ctx);
                             }
                         }
                         RequestStatus::Loading(_) => {
-                            ui.spinner();
+                            ui.add(egui::Spinner::new().size(size));
                         }
-                    }
-
-                    if let Some(items) = &self.loading_items {
-                        ui.label(format!(
-                            "Loaded {}/{}",
-                            loaded_amount.unwrap_or(0),
-                            items.len()
-                        ));
                     }
                 });
             });
