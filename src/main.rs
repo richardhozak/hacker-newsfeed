@@ -596,8 +596,6 @@ impl eframe::App for Application {
 
         egui::TopBottomPanel::top("header").show(ctx, |ui| {
             ui.horizontal(|ui| {
-                ui.spacing_mut().button_padding = Vec2::splat(5.0);
-
                 self.y_icon.as_ref().unwrap().show(ui);
 
                 ui.heading(RichText::new("Hacker News").strong());
