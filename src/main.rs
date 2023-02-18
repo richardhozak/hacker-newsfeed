@@ -1,5 +1,7 @@
 #![allow(dead_code)]
 
+use std::fmt::Display;
+
 use eframe::{
     egui::{
         self, CollapsingHeader, Color32, FontId, Key, KeyboardShortcut, Modifiers, RichText,
@@ -20,10 +22,19 @@ mod fetch_favicon;
 pub const DEBUG_SHORTCUT: KeyboardShortcut = KeyboardShortcut::new(Modifiers::NONE, Key::F12);
 pub const REFRESH_SHORTCUT: KeyboardShortcut = KeyboardShortcut::new(Modifiers::NONE, Key::F5);
 
+#[derive(Deserialize, Clone, Copy, PartialEq, Eq, Hash, Default)]
+struct HnItemId(usize);
+
+impl Display for HnItemId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
 #[derive(Deserialize, Clone)]
 #[serde(default)]
 struct HnItem {
-    id: usize,
+    id: HnItemId,
     deleted: bool,
     r#type: String,
     by: String,
@@ -31,13 +42,13 @@ struct HnItem {
     time: OffsetDateTime,
     text: String,
     dead: bool,
-    parent: usize,
-    poll: usize,
-    kids: Vec<usize>,
+    parent: HnItemId,
+    poll: HnItemId,
+    kids: Vec<HnItemId>,
     url: Option<Url>,
     score: usize,
     title: String,
-    parts: Vec<usize>,
+    parts: Vec<HnItemId>,
     descendants: usize, // comment count when type is story
 }
 
@@ -70,7 +81,7 @@ struct Application {
     status: RequestStatus,
     load_amount: Option<usize>,
     story_comments: Option<HnItem>,
-    items: HashMap<usize, Promise<ehttp::Result<HnItem>>>,
+    items: HashMap<HnItemId, Promise<ehttp::Result<HnItem>>>,
     favicons: HashMap<Url, Promise<ehttp::Result<RetainedImage>>>,
     page: Page,
     default_icon: Option<RetainedImage>,
@@ -116,7 +127,7 @@ where
 }
 
 #[rustfmt::skip]
-fn fetch_page_stories(page: Page, ctx: egui::Context) -> Promise<ehttp::Result<Vec<usize>>> {
+fn fetch_page_stories(page: Page, ctx: egui::Context) -> Promise<ehttp::Result<Vec<HnItemId>>> {
     match page {
         Page::Top => fetch_url(ctx, "https://hacker-news.firebaseio.com/v0/topstories.json"),
         Page::New => fetch_url(ctx, "https://hacker-news.firebaseio.com/v0/newstories.json"),
@@ -126,7 +137,7 @@ fn fetch_page_stories(page: Page, ctx: egui::Context) -> Promise<ehttp::Result<V
     }
 }
 
-fn fetch_item(ctx: egui::Context, item_id: usize) -> Promise<ehttp::Result<HnItem>> {
+fn fetch_item(ctx: egui::Context, item_id: HnItemId) -> Promise<ehttp::Result<HnItem>> {
     // https://hacker-news.firebaseio.com/v0/item/8863.json
     fetch_url(
         ctx,
@@ -341,7 +352,7 @@ impl Application {
         }
     }
 
-    fn render_comment(&mut self, comment_id: usize, ctx: &egui::Context, ui: &mut egui::Ui) {
+    fn render_comment(&mut self, comment_id: HnItemId, ctx: &egui::Context, ui: &mut egui::Ui) {
         let promise = match self.items.remove(&comment_id) {
             Some(promise) => promise,
             None => fetch_item(ctx.clone(), comment_id),
@@ -469,8 +480,8 @@ fn format_comments(count: usize) -> String {
 }
 
 enum RequestStatus {
-    Done(Vec<usize>),
-    Loading(Promise<ehttp::Result<Vec<usize>>>),
+    Done(Vec<HnItemId>),
+    Loading(Promise<ehttp::Result<Vec<HnItemId>>>),
     Error(String),
 }
 
