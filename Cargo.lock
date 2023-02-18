@@ -1125,7 +1125,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "hacker-news"
+name = "hacker-newsfeed"
 version = "0.1.0"
 dependencies = [
  "eframe",
