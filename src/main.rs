@@ -496,6 +496,20 @@ impl Application {
         loaded
     }
 
+    fn load_missing_comments_for_opened_story(&mut self, ctx: &egui::Context) {
+        if let Some(story_id) = self.display_comments_for_story {
+            if let Some(promise) = self.item_cache.remove(&story_id) {
+                if let Some(result) = promise.ready() {
+                    if let Ok(story) = result {
+                        self.load_comments(&story, ctx);
+                    }
+                }
+
+                self.item_cache.insert(story_id, promise);
+            }
+        }
+    }
+
     fn load_missing_page_stories(&mut self, ctx: &egui::Context) {
         if let RequestStatus::Done(item_ids) = &self.page_status {
             for &id in self.displayed_page_stories(item_ids) {
@@ -514,6 +528,13 @@ impl Application {
             .iter()
             .skip(self.page_number * self.page_size)
             .take(self.page_size)
+    }
+
+    fn get_item(&self, item_id: &HnItemId) -> Option<&HnItem> {
+        self.item_cache
+            .get(&item_id)
+            .and_then(|promise| promise.ready())
+            .and_then(|result| result.as_ref().ok())
     }
 }
 
@@ -556,6 +577,7 @@ impl eframe::App for Application {
 
         self.load_missing_page_stories(ctx);
         self.load_missing_icons(ctx);
+        self.load_missing_comments_for_opened_story(ctx);
 
         let loading_any_items = self.item_cache.iter().any(|(_, p)| p.ready().is_none());
         let loading_stories = if let RequestStatus::Done(item_ids) = &self.page_status {
@@ -634,40 +656,26 @@ impl eframe::App for Application {
         egui::CentralPanel::default().show(ctx, |ui| {
             egui::ScrollArea::vertical().show(ui, |ui| {
                 if let Some(story_id) = self.display_comments_for_story {
-                    if let Some(promise) = self.item_cache.remove(&story_id) {
-                        if let Some(result) = promise.ready() {
-                            if let Ok(story) = result {
-                                self.render_story(story, ui, true, false);
+                    if let Some(story) = self.get_item(&story_id) {
+                        self.render_story(story, ui, true, false);
 
-                                ui.separator();
+                        ui.separator();
 
-                                if !self.load_comments(story, ctx) {
-                                    ui.label("Loading...");
-                                }
-
-                                for comment_id in &story.kids {
-                                    self.render_comment(*comment_id, ctx, ui);
-                                }
-                            }
+                        for comment_id in &story.kids {
+                            self.render_comment(*comment_id, ctx, ui);
                         }
-
-                        self.item_cache.insert(story_id, promise);
                     }
                 } else {
                     match (&self.page_status, loading_stories) {
                         (RequestStatus::Done(story_items), false) => {
                             for story_id in self.displayed_page_stories(story_items) {
-                                if let Some(promise) = self.item_cache.get(story_id) {
-                                    if let Some(result) = promise.ready() {
-                                        if let Ok(story) = result {
-                                            if self.render_story(story, ui, false, true) {
-                                                self.display_comments_for_story = Some(story.id);
-                                            }
-                                        }
+                                if let Some(story) = self.get_item(story_id) {
+                                    if self.render_story(story, ui, false, true) {
+                                        self.display_comments_for_story = Some(story.id);
                                     }
-                                }
 
-                                ui.separator();
+                                    ui.separator();
+                                }
                             }
 
                             ui.vertical_centered(|ui| {
