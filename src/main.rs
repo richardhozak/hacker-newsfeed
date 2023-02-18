@@ -138,10 +138,11 @@ fn fetch_item(ctx: egui::Context, item_id: usize) -> Promise<ehttp::Result<HnIte
     )
 }
 
-fn configure_text_styles(ctx: &egui::Context) {
+fn configure_styles(ctx: &egui::Context) {
     use egui::FontFamily::{Monospace, Proportional};
 
     let mut style = (*ctx.style()).clone();
+
     style.text_styles = [
         (TextStyle::Small, FontId::new(8.0, Proportional)),
         (TextStyle::Body, FontId::new(16.0, Proportional)),
@@ -150,6 +151,10 @@ fn configure_text_styles(ctx: &egui::Context) {
         (TextStyle::Heading, FontId::new(22.0, Proportional)),
     ]
     .into();
+
+    // give buttons a little bit of breathing room
+    style.spacing.button_padding = Vec2::splat(5.0);
+
     ctx.set_style(style);
 }
 
@@ -196,7 +201,7 @@ fn rich_text_with_style(text: impl Into<String>, style: &comment_parser::TextSty
 impl Application {
     fn new(cc: &CreationContext) -> Self {
         configure_visuals(&cc.egui_ctx);
-        configure_text_styles(&cc.egui_ctx);
+        configure_styles(&cc.egui_ctx);
 
         let status = RequestStatus::Loading(fetch_page_stories(Page::Top, cc.egui_ctx.clone()));
 
@@ -570,7 +575,9 @@ impl eframe::App for Application {
             }
         }
 
-        egui::TopBottomPanel::top("top_menu_panel").show(ctx, |ui| {
+        let mut go_back = false;
+
+        egui::TopBottomPanel::top("header").show(ctx, |ui| {
             ui.horizontal(|ui| {
                 ui.spacing_mut().button_padding = Vec2::splat(5.0);
 
@@ -605,18 +612,27 @@ impl eframe::App for Application {
                             ui.add(egui::Spinner::new().size(size));
                         }
                     }
+
+                    let can_go_back = !matches!(self.status, RequestStatus::Loading(_))
+                        && self.story_comments.is_some();
+
+                    ui.add_enabled_ui(can_go_back, |ui| {
+                        if ui
+                            .add_sized(
+                                [size, size],
+                                egui::Button::new(RichText::new("⮨").size(size * 0.6)),
+                            )
+                            .clicked()
+                        {
+                            go_back = true;
+                        }
+                    });
                 });
             });
         });
 
-        let mut go_back = false;
-
         if let Some(story_comments) = &self.story_comments.clone() {
             egui::CentralPanel::default().show(ctx, |ui| {
-                if ui.button("Back").clicked() {
-                    go_back = true;
-                }
-
                 egui::ScrollArea::vertical().show(ui, |ui| {
                     self.render_story(story_comments, ui, true, false);
 
