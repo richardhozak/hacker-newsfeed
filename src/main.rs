@@ -20,62 +20,58 @@ mod fetch_favicon;
 pub const DEBUG_SHORTCUT: KeyboardShortcut = KeyboardShortcut::new(Modifiers::NONE, Key::F12);
 pub const REFRESH_SHORTCUT: KeyboardShortcut = KeyboardShortcut::new(Modifiers::NONE, Key::F5);
 
-#[derive(Clone)]
-struct Story {
-    url: Option<Url>,
-    title: String,
-    author: String,
-    created: OffsetDateTime,
-    points: usize,
-    comments: usize,
-
-    item: HnItem,
-}
-
-impl Story {
-    fn from_hn_item(item: &HnItem) -> Self {
-        Self {
-            url: Url::parse(&item.url).ok(),
-            title: item.title.clone(),
-            author: item.by.clone(),
-            created: OffsetDateTime::from_unix_timestamp(item.time)
-                .unwrap_or_else(|_| OffsetDateTime::now_utc()),
-            points: item.score,
-            comments: item.descendants,
-            item: item.clone(),
-        }
-    }
-}
-
-#[derive(Default, Deserialize, Clone)]
+#[derive(Deserialize, Clone)]
 #[serde(default)]
 struct HnItem {
     id: usize,
     deleted: bool,
     r#type: String,
     by: String,
-    time: i64,
+    #[serde(with = "time::serde::timestamp")]
+    time: OffsetDateTime,
     text: String,
     dead: bool,
     parent: usize,
     poll: usize,
     kids: Vec<usize>,
-    url: String,
+    url: Option<Url>,
     score: usize,
     title: String,
     parts: Vec<usize>,
-    descendants: usize,
+    descendants: usize, // comment count when type is story
+}
+
+impl Default for HnItem {
+    fn default() -> Self {
+        Self {
+            id: Default::default(),
+            deleted: Default::default(),
+            r#type: Default::default(),
+            by: Default::default(),
+            time: OffsetDateTime::now_utc(),
+            text: Default::default(),
+            dead: Default::default(),
+            parent: Default::default(),
+            poll: Default::default(),
+            kids: Default::default(),
+            url: Default::default(),
+            score: Default::default(),
+            title: Default::default(),
+            parts: Default::default(),
+            descendants: Default::default(),
+        }
+    }
 }
 
 #[derive(Default)]
 struct Application {
-    stories: Vec<Story>,
+    stories: Vec<HnItem>,
     loading_items: Option<Vec<Promise<ehttp::Result<HnItem>>>>,
     status: RequestStatus,
     load_amount: Option<usize>,
-    story_comments: Option<Story>,
+    story_comments: Option<HnItem>,
     items: HashMap<usize, Promise<ehttp::Result<HnItem>>>,
-    favicons: HashMap<String, Promise<ehttp::Result<RetainedImage>>>,
+    favicons: HashMap<Url, Promise<ehttp::Result<RetainedImage>>>,
     page: Page,
     default_icon: Option<RetainedImage>,
     y_icon: Option<RetainedImage>,
@@ -262,7 +258,7 @@ impl Application {
 
     fn render_story(
         &self,
-        story: &Story,
+        story: &HnItem,
         ui: &mut egui::Ui,
         show_text: bool,
         can_open_comments: bool,
@@ -272,13 +268,13 @@ impl Application {
             OpenLink,
         }
 
-        let comment_link_enabled = story.comments > 0 && can_open_comments;
+        let comment_link_enabled = story.descendants > 0 && can_open_comments;
         let link_enabled = story.url.is_some() || comment_link_enabled;
         let mut intent = None;
 
         if let Some(url) = &story.url {
             ui.horizontal(|ui| {
-                if let Some(promise) = self.favicons.get(&story.item.url) {
+                if let Some(promise) = self.favicons.get(url) {
                     if let Some(result) = promise.ready() {
                         let image = result
                             .as_ref()
@@ -309,23 +305,23 @@ impl Application {
         };
 
         ui.horizontal(|ui| {
-            ui.label(RichText::new(&story.author).strong());
+            ui.label(RichText::new(&story.by).strong());
             ui.label("•");
-            ui.label(RichText::new(format_date_time(&story.created)).weak());
+            ui.label(RichText::new(format_date_time(&story.time)).weak());
         });
 
-        if show_text && story.item.text.len() > 0 {
-            self.render_html_text(&story.item.text, ui);
+        if show_text && story.text.len() > 0 {
+            self.render_html_text(&story.text, ui);
         }
 
         ui.horizontal(|ui| {
-            if let Some(points_str) = format_points(story.points) {
+            if let Some(points_str) = format_points(story.score) {
                 ui.label(&points_str);
                 ui.label("•");
             }
 
             ui.add_enabled_ui(comment_link_enabled, |ui| {
-                if ui.link(format_comments(story.comments)).clicked() {
+                if ui.link(format_comments(story.descendants)).clicked() {
                     intent = Some(Intent::OpenComments);
                 }
             });
@@ -374,7 +370,7 @@ impl Application {
                         );
                     }
                     text_layout.append(
-                        &format_unix_timestamp(comment.time),
+                        &format_date_time(&comment.time),
                         0.0,
                         TextFormat::simple(
                             FontId::proportional(16.0),
@@ -448,13 +444,6 @@ fn format_date_time(date_time: &OffsetDateTime) -> String {
             format!("{} days ago", duration.whole_days())
         }
     }
-}
-
-fn format_unix_timestamp(timestamp: i64) -> String {
-    let date_time =
-        OffsetDateTime::from_unix_timestamp(timestamp).unwrap_or(OffsetDateTime::now_utc());
-
-    format_date_time(&date_time)
 }
 
 fn format_points(points: usize) -> Option<String> {
@@ -552,11 +541,11 @@ impl eframe::App for Application {
                     let result = promise.ready().unwrap();
                     match result {
                         Ok(item) => {
-                            hn_stories.push(Story::from_hn_item(item));
-                            if !item.url.is_empty() {
+                            hn_stories.push(item.clone());
+                            if let Some(url) = &item.url {
                                 self.favicons.insert(
-                                    item.url.to_string(),
-                                    fetch_favicon::fetch_favicon(ctx.clone(), &item.url),
+                                    url.clone(),
+                                    fetch_favicon::fetch_favicon(ctx.clone(), url.as_str()),
                                 );
                             }
                         }
@@ -638,7 +627,7 @@ impl eframe::App for Application {
 
                     ui.separator();
 
-                    for comment_id in &story_comments.item.kids {
+                    for comment_id in &story_comments.kids {
                         self.render_comment(*comment_id, ctx, ui);
                     }
                 });
