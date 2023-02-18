@@ -11,6 +11,7 @@ use eframe::{
     CreationContext,
 };
 use egui_extras::RetainedImage;
+use fetch_favicon::fetch_favicon;
 use poll_promise::Promise;
 use serde::Deserialize;
 use time::OffsetDateTime;
@@ -276,6 +277,21 @@ impl Application {
         });
     }
 
+    fn load_missing_icons(&mut self, ctx: &egui::Context) {
+        for (_, promise) in &self.item_cache {
+            if let Some(result) = promise.ready() {
+                if let Ok(item) = result {
+                    if let Some(url) = &item.url {
+                        if !self.favicons.contains_key(url) {
+                            self.favicons
+                                .insert(url.clone(), fetch_favicon(ctx.clone(), url.as_str()));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     fn render_story(
         &self,
         story: &HnItem,
@@ -294,20 +310,16 @@ impl Application {
 
         if let Some(url) = &story.url {
             ui.horizontal(|ui| {
-                if let Some(promise) = self.favicons.get(url) {
-                    if let Some(result) = promise.ready() {
-                        let image = result
-                            .as_ref()
-                            .ok()
-                            .unwrap_or_else(|| self.default_icon.as_ref().unwrap());
-                        let height = ui.available_height();
-                        image.show_size(ui, Vec2::new(height, height));
-                    } else {
-                        ui.spinner();
-                    }
-                } else {
-                    ui.label("?");
-                }
+                let icon = self
+                    .favicons
+                    .get(url)
+                    .and_then(|promise| promise.ready())
+                    .and_then(|result| result.as_ref().ok())
+                    .unwrap_or_else(|| self.default_icon.as_ref().unwrap());
+
+                let height = ui.available_height();
+                icon.show_size(ui, Vec2::new(height, height));
+
                 ui.label(RichText::new(human_format::url(url)).monospace());
             });
         }
@@ -545,6 +557,8 @@ impl eframe::App for Application {
                 self.load_more(ctx);
             }
         }
+
+        self.load_missing_icons(ctx);
 
         let old_page = self.page_name;
         let mut go_back = false;
