@@ -655,16 +655,16 @@ impl eframe::App for Application {
                             ui.separator();
                         }
 
-                        match self.load_amount {
-                            Some(_) => {
-                                ui.spinner();
+                        ui.vertical_centered(|ui| {
+                            let can_load_more = self.loading_items.is_none();
+
+                            if ui
+                                .add_enabled(can_load_more, egui::Button::new("Load More"))
+                                .clicked()
+                            {
+                                self.load_amount = Some(15);
                             }
-                            None => {
-                                if ui.button("Load more").clicked() {
-                                    self.load_amount = Some(15);
-                                }
-                            }
-                        }
+                        });
                     });
                 }
                 RequestStatus::Loading(_) => {
