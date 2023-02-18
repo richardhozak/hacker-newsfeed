@@ -364,8 +364,8 @@ impl Application {
         }
     }
 
-    fn render_comment(&mut self, comment_id: HnItemId, ctx: &egui::Context, ui: &mut egui::Ui) {
-        let promise = match self.item_cache.remove(&comment_id) {
+    fn render_comment(&self, comment_id: HnItemId, ctx: &egui::Context, ui: &mut egui::Ui) {
+        let promise = match self.item_cache.get(&comment_id) {
             Some(promise) => promise,
             None => return,
         };
@@ -434,8 +434,6 @@ impl Application {
                 }
             };
         }
-
-        self.item_cache.insert(comment_id, promise);
     }
 
     fn refresh(&mut self, ctx: &egui::Context) {
