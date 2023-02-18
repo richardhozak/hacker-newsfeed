@@ -647,11 +647,22 @@ impl eframe::App for Application {
             });
         });
 
-        egui::TopBottomPanel::bottom("footer").show(ctx, |ui| {
-            if loading {
-                ui.label("Loading...");
-            }
-        });
+        egui::TopBottomPanel::bottom("footer")
+            .show_separator_line(false)
+            .show(ctx, |ui| {
+                ui.horizontal(|ui| {
+                    if loading {
+                        ui.label("Loading...");
+                    }
+
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
+                        ui.hyperlink_to(
+                            "\u{e624} Hacker Newsfeed on GitHub",
+                            "https://www.github.com",
+                        );
+                    });
+                });
+            });
 
         egui::CentralPanel::default().show(ctx, |ui| {
             egui::ScrollArea::vertical().show(ui, |ui| {
