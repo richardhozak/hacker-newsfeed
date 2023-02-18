@@ -677,7 +677,7 @@ impl eframe::App for Application {
                         }
                     }
                 } else {
-                    match (&self.page_status, loading_stories) {
+                    let error = match (&self.page_status, loading_stories) {
                         (RequestStatus::Done(story_items), false) => {
                             for story_id in self.displayed_page_stories(story_items) {
                                 if let Some(story) = self.get_item(story_id) {
@@ -697,16 +697,20 @@ impl eframe::App for Application {
                                     self.page_number += 1;
                                 }
                             });
+
+                            None
                         }
-                        (RequestStatus::Error(error), false) => {
-                            ui.vertical_centered(|ui| {
-                                ui.colored_label(ui.visuals().error_fg_color, error);
-                                if ui.button("Retry").clicked() {
-                                    eprintln!("Retry");
-                                }
-                            });
-                        }
-                        _ => {}
+                        (RequestStatus::Error(error), false) => Some(error.to_string()),
+                        _ => None,
+                    };
+
+                    if let Some(error) = error {
+                        ui.vertical_centered(|ui| {
+                            ui.colored_label(ui.visuals().error_fg_color, error);
+                            if ui.button("Retry").clicked() {
+                                self.refresh(ctx);
+                            }
+                        });
                     }
                 }
             });
