@@ -78,15 +78,18 @@ impl Default for HnItem {
 #[derive(Default)]
 struct Application {
     display_stories: Vec<HnItemId>,
-    page_status: RequestStatus,
 
     display_comments_for_story: Option<HnItemId>,
 
     // items that are loaded or being loaded from api
     item_cache: HashMap<HnItemId, Promise<ehttp::Result<HnItem>>>,
 
+    page_name: Page,    // what type of page/tab to display
+    page_number: usize, // the story/article offset of given page to display
+    page_size: usize,   // how many stories to display at once in page from page number offset
+    page_status: RequestStatus,
+
     favicons: HashMap<Url, Promise<ehttp::Result<RetainedImage>>>,
-    page: Page,
     default_icon: Option<RetainedImage>,
     y_icon: Option<RetainedImage>,
     render_html: bool,
@@ -233,6 +236,7 @@ impl Application {
 
         Self {
             page_status,
+            page_size: 15,
             default_icon: Some(default_icon),
             y_icon: Some(y_icon),
             render_html: true,
@@ -431,7 +435,7 @@ impl Application {
     }
 
     fn refresh(&mut self, ctx: &egui::Context) {
-        self.page_status = RequestStatus::Loading(fetch_page_stories(self.page, ctx.clone()));
+        self.page_status = RequestStatus::Loading(fetch_page_stories(self.page_name, ctx.clone()));
     }
 
     fn load_comments(&mut self, item: &HnItem, ctx: &egui::Context) -> bool {
@@ -460,6 +464,25 @@ impl Application {
         }
 
         loaded
+    }
+
+    fn load_more(&mut self, ctx: &egui::Context) {
+        if let RequestStatus::Done(item_ids) = &self.page_status {
+            self.display_stories.clear();
+
+            for &id in item_ids
+                .iter()
+                .skip(self.page_number * self.page_size)
+                .take(self.page_size)
+            {
+                self.display_stories.push(id);
+                self.item_cache
+                    .entry(id)
+                    .or_insert_with(|| fetch_item(ctx.clone(), id));
+            }
+
+            self.page_number += 1;
+        }
     }
 }
 
@@ -531,12 +554,17 @@ impl eframe::App for Application {
             self.refresh(&ctx);
         }
 
+        let mut just_loaded_page = false;
+
         self.page_status = match std::mem::take(&mut self.page_status) {
             RequestStatus::Done(items) => RequestStatus::Done(items),
             RequestStatus::Loading(mut promise) => {
                 if let Some(result) = promise.ready_mut() {
                     match result {
-                        Ok(resource) => RequestStatus::Done(std::mem::take(resource)),
+                        Ok(resource) => {
+                            just_loaded_page = true;
+                            RequestStatus::Done(std::mem::take(resource))
+                        }
                         Err(error) => RequestStatus::Error(std::mem::take(error)),
                     }
                 } else {
@@ -546,17 +574,13 @@ impl eframe::App for Application {
             RequestStatus::Error(error) => RequestStatus::Error(error),
         };
 
-        if let RequestStatus::Done(items) = &self.page_status {
-            if self.display_stories.is_empty() {
-                for item_id in items.iter().take(15) {
-                    self.display_stories.push(*item_id);
-                    self.item_cache
-                        .insert(*item_id, fetch_item(ctx.clone(), *item_id));
-                }
+        if just_loaded_page {
+            if self.page_number == 0 {
+                self.load_more(ctx);
             }
         }
 
-        let old_page = self.page;
+        let old_page = self.page_name;
         let mut go_back = false;
 
         let loading_any_items = self.item_cache.iter().any(|(_, p)| p.ready().is_none());
@@ -575,11 +599,11 @@ impl eframe::App for Application {
 
                 ui.add_space(10.0);
 
-                ui.selectable_value(&mut self.page, Page::Top, "Top");
-                ui.selectable_value(&mut self.page, Page::New, "New");
-                ui.selectable_value(&mut self.page, Page::Show, "Show");
-                ui.selectable_value(&mut self.page, Page::Ask, "Ask");
-                ui.selectable_value(&mut self.page, Page::Jobs, "Jobs");
+                ui.selectable_value(&mut self.page_name, Page::Top, "Top");
+                ui.selectable_value(&mut self.page_name, Page::New, "New");
+                ui.selectable_value(&mut self.page_name, Page::Show, "Show");
+                ui.selectable_value(&mut self.page_name, Page::Ask, "Ask");
+                ui.selectable_value(&mut self.page_name, Page::Jobs, "Jobs");
 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     let size = ui.available_height() * 0.6;
@@ -666,7 +690,9 @@ impl eframe::App for Application {
                                 if ui
                                     .add_enabled(!loading_any_items, egui::Button::new("Load More"))
                                     .clicked()
-                                {}
+                                {
+                                    self.load_more(ctx);
+                                }
                             });
                         });
                     }
@@ -724,10 +750,12 @@ impl eframe::App for Application {
             self.display_comments_for_story = None;
         }
 
-        if old_page != self.page {
+        if old_page != self.page_name {
             self.display_comments_for_story = None;
             self.display_stories.clear();
-            self.page_status = RequestStatus::Loading(fetch_page_stories(self.page, ctx.clone()));
+            self.page_status =
+                RequestStatus::Loading(fetch_page_stories(self.page_name, ctx.clone()));
+            self.page_number = 0;
             ctx.request_repaint();
         }
     }
