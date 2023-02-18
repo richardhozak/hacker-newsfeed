@@ -643,10 +643,10 @@ impl eframe::App for Application {
             });
         });
 
-        if let Some(story_id) = &self.display_comments_for_story.clone() {
-            egui::CentralPanel::default().show(ctx, |ui| {
-                egui::ScrollArea::vertical().show(ui, |ui| {
-                    if let Some(promise) = self.item_cache.remove(story_id) {
+        egui::CentralPanel::default().show(ctx, |ui| {
+            egui::ScrollArea::vertical().show(ui, |ui| {
+                if let Some(story_id) = self.display_comments_for_story {
+                    if let Some(promise) = self.item_cache.remove(&story_id) {
                         if let Some(result) = promise.ready() {
                             if let Ok(story) = result {
                                 self.render_story(story, ui, true, false);
@@ -663,15 +663,11 @@ impl eframe::App for Application {
                             }
                         }
 
-                        self.item_cache.insert(*story_id, promise);
+                        self.item_cache.insert(story_id, promise);
                     }
-                });
-            });
-        } else {
-            egui::CentralPanel::default().show(ctx, |ui| {
-                match (&self.page_status, loading_stories) {
-                    (RequestStatus::Done(_), false) => {
-                        egui::ScrollArea::vertical().show(ui, |ui| {
+                } else {
+                    match (&self.page_status, loading_stories) {
+                        (RequestStatus::Done(_), false) => {
                             for story_id in &self.display_stories {
                                 if let Some(promise) = self.item_cache.get(story_id) {
                                     if let Some(result) = promise.ready() {
@@ -694,22 +690,22 @@ impl eframe::App for Application {
                                     self.load_more(ctx);
                                 }
                             });
-                        });
-                    }
-                    (RequestStatus::Error(error), false) => {
-                        ui.vertical_centered(|ui| {
-                            ui.colored_label(ui.visuals().error_fg_color, error);
-                            if ui.button("Retry").clicked() {
-                                eprintln!("Retry");
-                            }
-                        });
-                    }
-                    _ => {
-                        ui.label("Loading...");
+                        }
+                        (RequestStatus::Error(error), false) => {
+                            ui.vertical_centered(|ui| {
+                                ui.colored_label(ui.visuals().error_fg_color, error);
+                                if ui.button("Retry").clicked() {
+                                    eprintln!("Retry");
+                                }
+                            });
+                        }
+                        _ => {
+                            ui.label("Loading...");
+                        }
                     }
                 }
             });
-        }
+        });
 
         let mut show_debug_window = self.show_debug_window;
 
