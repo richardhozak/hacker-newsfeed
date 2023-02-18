@@ -14,6 +14,7 @@ use egui_extras::RetainedImage;
 use poll_promise::Promise;
 use serde::Deserialize;
 use time::OffsetDateTime;
+use tracing::warn;
 use url::Url;
 
 mod comment_parser;
@@ -76,12 +77,14 @@ impl Default for HnItem {
 
 #[derive(Default)]
 struct Application {
-    stories: Vec<HnItem>,
-    loading_items: Option<Vec<Promise<ehttp::Result<HnItem>>>>,
-    status: RequestStatus,
-    load_amount: Option<usize>,
-    story_comments: Option<HnItem>,
-    items: HashMap<HnItemId, Promise<ehttp::Result<HnItem>>>,
+    display_stories: Vec<HnItemId>,
+    page_status: RequestStatus,
+
+    display_comments_for_story: Option<HnItemId>,
+
+    // items that are loaded or being loaded from api
+    item_cache: HashMap<HnItemId, Promise<ehttp::Result<HnItem>>>,
+
     favicons: HashMap<Url, Promise<ehttp::Result<RetainedImage>>>,
     page: Page,
     default_icon: Option<RetainedImage>,
@@ -210,7 +213,8 @@ impl Application {
         configure_visuals(&cc.egui_ctx);
         configure_styles(&cc.egui_ctx);
 
-        let status = RequestStatus::Loading(fetch_page_stories(Page::Top, cc.egui_ctx.clone()));
+        let page_status =
+            RequestStatus::Loading(fetch_page_stories(Page::Top, cc.egui_ctx.clone()));
 
         let default_icon = RetainedImage::from_image_bytes(
             "default_icon",
@@ -228,7 +232,7 @@ impl Application {
         .unwrap();
 
         Self {
-            status,
+            page_status,
             default_icon: Some(default_icon),
             y_icon: Some(y_icon),
             render_html: true,
@@ -353,9 +357,9 @@ impl Application {
     }
 
     fn render_comment(&mut self, comment_id: HnItemId, ctx: &egui::Context, ui: &mut egui::Ui) {
-        let promise = match self.items.remove(&comment_id) {
+        let promise = match self.item_cache.remove(&comment_id) {
             Some(promise) => promise,
-            None => fetch_item(ctx.clone(), comment_id),
+            None => return,
         };
 
         if let Some(result) = promise.ready() {
@@ -421,15 +425,41 @@ impl Application {
                     ui.label(format!("Error: {}", error));
                 }
             };
-        } else {
-            ui.spinner();
         }
 
-        self.items.insert(comment_id, promise);
+        self.item_cache.insert(comment_id, promise);
     }
 
     fn refresh(&mut self, ctx: &egui::Context) {
-        self.status = RequestStatus::Loading(fetch_page_stories(self.page, ctx.clone()));
+        self.page_status = RequestStatus::Loading(fetch_page_stories(self.page, ctx.clone()));
+    }
+
+    fn load_comments(&mut self, item: &HnItem, ctx: &egui::Context) -> bool {
+        let mut loaded = true;
+
+        for &kid in &item.kids {
+            let promise = match self.item_cache.remove(&kid) {
+                Some(promise) => promise,
+                None => fetch_item(ctx.clone(), kid),
+            };
+
+            if let Some(result) = promise.ready() {
+                match result {
+                    Ok(kid_item) => {
+                        if !self.load_comments(kid_item, ctx) {
+                            loaded = false;
+                        }
+                    }
+                    Err(error) => warn!("cannot load comment: {}", error),
+                }
+            } else {
+                loaded = false;
+            }
+
+            self.item_cache.insert(kid, promise);
+        }
+
+        loaded
     }
 }
 
@@ -501,7 +531,7 @@ impl eframe::App for Application {
             self.refresh(&ctx);
         }
 
-        self.status = match std::mem::take(&mut self.status) {
+        self.page_status = match std::mem::take(&mut self.page_status) {
             RequestStatus::Done(items) => RequestStatus::Done(items),
             RequestStatus::Loading(mut promise) => {
                 if let Some(result) = promise.ready_mut() {
@@ -516,66 +546,24 @@ impl eframe::App for Application {
             RequestStatus::Error(error) => RequestStatus::Error(error),
         };
 
-        if let RequestStatus::Done(items) = &self.status {
-            if self.loading_items.is_none() {
-                if let Some(load_amount) = self.load_amount {
-                    let to_load: Vec<_> = items
-                        .iter()
-                        .skip(self.stories.len())
-                        .take(load_amount)
-                        .map(|item_id| fetch_item(ctx.clone(), *item_id))
-                        .collect();
-
-                    self.loading_items = Some(to_load);
-                    self.load_amount = None;
-                } else if self.stories.is_empty() {
-                    self.load_amount = Some(15);
-                    ctx.request_repaint();
+        if let RequestStatus::Done(items) = &self.page_status {
+            if self.display_stories.is_empty() {
+                for item_id in items.iter().take(15) {
+                    self.display_stories.push(*item_id);
+                    self.item_cache
+                        .insert(*item_id, fetch_item(ctx.clone(), *item_id));
                 }
             }
         }
 
         let old_page = self.page;
-
-        let loaded_amount = self.loading_items.as_ref().map(|items| {
-            items
-                .iter()
-                .filter(|promise| promise.ready().is_some())
-                .count()
-        });
-
-        if let Some(promises) = &mut self.loading_items {
-            if promises.len() == loaded_amount.unwrap() {
-                let mut hn_stories = Vec::new();
-                let mut error_message = String::new();
-                for promise in &mut *promises {
-                    let result = promise.ready().unwrap();
-                    match result {
-                        Ok(item) => {
-                            hn_stories.push(item.clone());
-                            if let Some(url) = &item.url {
-                                self.favicons.insert(
-                                    url.clone(),
-                                    fetch_favicon::fetch_favicon(ctx.clone(), url.as_str()),
-                                );
-                            }
-                        }
-                        Err(error) => {
-                            error_message.push_str(&error);
-                            error_message.push('\n');
-                        }
-                    }
-                }
-
-                if error_message.is_empty() {
-                    self.stories.append(&mut hn_stories);
-                }
-
-                self.loading_items = None;
-            }
-        }
-
         let mut go_back = false;
+
+        let loading_any_items = self.item_cache.iter().any(|(_, p)| p.ready().is_none());
+        let loading_stories = self
+            .item_cache
+            .iter()
+            .any(|(id, p)| p.ready().is_none() && self.display_stories.contains(id));
 
         egui::TopBottomPanel::top("header").show(ctx, |ui| {
             ui.horizontal(|ui| {
@@ -596,8 +584,8 @@ impl eframe::App for Application {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     let size = ui.available_height() * 0.6;
 
-                    match self.status {
-                        RequestStatus::Done(_) | RequestStatus::Error(_) => {
+                    match (&self.page_status, loading_any_items) {
+                        (RequestStatus::Done(_) | RequestStatus::Error(_), false) => {
                             if ui
                                 .add_sized(
                                     [size, size],
@@ -608,13 +596,13 @@ impl eframe::App for Application {
                                 self.refresh(&ctx);
                             }
                         }
-                        RequestStatus::Loading(_) => {
+                        _ => {
                             ui.add(egui::Spinner::new().size(size));
                         }
                     }
 
-                    let can_go_back = !matches!(self.status, RequestStatus::Loading(_))
-                        && self.story_comments.is_some();
+                    let can_go_back = !matches!(self.page_status, RequestStatus::Loading(_))
+                        && self.display_comments_for_story.is_some();
 
                     ui.add_enabled_ui(can_go_back, |ui| {
                         if ui
@@ -631,52 +619,68 @@ impl eframe::App for Application {
             });
         });
 
-        if let Some(story_comments) = &self.story_comments.clone() {
+        if let Some(story_id) = &self.display_comments_for_story.clone() {
             egui::CentralPanel::default().show(ctx, |ui| {
                 egui::ScrollArea::vertical().show(ui, |ui| {
-                    self.render_story(story_comments, ui, true, false);
+                    if let Some(promise) = self.item_cache.remove(story_id) {
+                        if let Some(result) = promise.ready() {
+                            if let Ok(story) = result {
+                                self.render_story(story, ui, true, false);
 
-                    ui.separator();
+                                ui.separator();
 
-                    for comment_id in &story_comments.kids {
-                        self.render_comment(*comment_id, ctx, ui);
+                                if !self.load_comments(story, ctx) {
+                                    ui.label("Loading...");
+                                }
+
+                                for comment_id in &story.kids {
+                                    self.render_comment(*comment_id, ctx, ui);
+                                }
+                            }
+                        }
+
+                        self.item_cache.insert(*story_id, promise);
                     }
                 });
             });
         } else {
-            egui::CentralPanel::default().show(ctx, |ui| match &self.status {
-                RequestStatus::Done(_) => {
-                    egui::ScrollArea::vertical().show(ui, |ui| {
-                        for story in &self.stories {
-                            if self.render_story(story, ui, false, true) {
-                                self.story_comments = Some(story.clone());
+            egui::CentralPanel::default().show(ctx, |ui| {
+                match (&self.page_status, loading_stories) {
+                    (RequestStatus::Done(_), false) => {
+                        egui::ScrollArea::vertical().show(ui, |ui| {
+                            for story_id in &self.display_stories {
+                                if let Some(promise) = self.item_cache.get(story_id) {
+                                    if let Some(result) = promise.ready() {
+                                        if let Ok(story) = result {
+                                            if self.render_story(story, ui, false, true) {
+                                                self.display_comments_for_story = Some(story.id);
+                                            }
+                                        }
+                                    }
+                                }
+
+                                ui.separator();
                             }
 
-                            ui.separator();
-                        }
-
+                            ui.vertical_centered(|ui| {
+                                if ui
+                                    .add_enabled(!loading_any_items, egui::Button::new("Load More"))
+                                    .clicked()
+                                {}
+                            });
+                        });
+                    }
+                    (RequestStatus::Error(error), false) => {
                         ui.vertical_centered(|ui| {
-                            let can_load_more = self.loading_items.is_none();
-
-                            if ui
-                                .add_enabled(can_load_more, egui::Button::new("Load More"))
-                                .clicked()
-                            {
-                                self.load_amount = Some(15);
+                            ui.colored_label(ui.visuals().error_fg_color, error);
+                            if ui.button("Retry").clicked() {
+                                eprintln!("Retry");
                             }
                         });
-                    });
-                }
-                RequestStatus::Loading(_) => {
-                    ui.label("Loading...");
-                }
-                RequestStatus::Error(error) => {
-                    ui.vertical_centered(|ui| {
-                        ui.colored_label(ui.visuals().error_fg_color, error);
-                        if ui.button("Retry").clicked() {
-                            eprintln!("Retry");
-                        }
-                    });
+                    }
+                    _ => {
+                        ui.label("Loading...");
+                    }
                 }
             });
         }
@@ -717,15 +721,13 @@ impl eframe::App for Application {
         self.show_debug_window = show_debug_window;
 
         if go_back {
-            self.story_comments = None;
+            self.display_comments_for_story = None;
         }
 
         if old_page != self.page {
-            self.load_amount = None;
-            self.stories.clear();
-            self.loading_items = None;
-            self.status = RequestStatus::Loading(fetch_page_stories(self.page, ctx.clone()));
-            self.story_comments = None;
+            self.display_comments_for_story = None;
+            self.display_stories.clear();
+            self.page_status = RequestStatus::Loading(fetch_page_stories(self.page, ctx.clone()));
             ctx.request_repaint();
         }
     }
