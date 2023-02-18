@@ -176,11 +176,6 @@ fn configure_visuals(ctx: &egui::Context) {
 
     const HN_ORANGE: Color32 = Color32::from_rgb(0xff, 0x6d, 0x00);
 
-    // #f6f6ef
-
-    // visuals.window_fill = Color32::BROWN;
-    // visuals.widgets.noninteractive.bg_fill = Color32::BROWN;
-
     // the background of central panel
     visuals.panel_fill = Color32::from_rgb(0xf6, 0xf6, 0xef);
 
@@ -223,7 +218,7 @@ impl Application {
             "default_icon",
             include_bytes!(concat!(
                 env!("CARGO_MANIFEST_DIR"),
-                "/assets/default_icon.png" // https://icons8.com/icon/NyuxPErq0tu2/globe-africa
+                "/assets/default_icon.png"
             )),
         )
         .unwrap();
