@@ -79,8 +79,6 @@ impl Default for HnItem {
 
 #[derive(Default)]
 struct Application {
-    display_stories: Vec<HnItemId>,
-
     display_comments_for_story: Option<HnItemId>,
 
     // items that are loaded or being loaded from api
@@ -448,8 +446,26 @@ impl Application {
         }
     }
 
+    fn remove_item_with_kids(&mut self, item_id: HnItemId) {
+        if let Some(promise) = self.item_cache.remove(&item_id) {
+            if let Ok(result) = promise.try_take() {
+                if let Ok(item) = result {
+                    for kid_id in &item.kids {
+                        self.remove_item_with_kids(*kid_id);
+                    }
+                }
+            }
+        }
+    }
+
     fn refresh(&mut self, ctx: &egui::Context) {
-        self.page_status = RequestStatus::Loading(fetch_page_stories(self.page_name, ctx.clone()));
+        if let Some(story_id) = self.display_comments_for_story {
+            self.remove_item_with_kids(story_id);
+        } else {
+            self.item_cache.clear();
+            self.page_status =
+                RequestStatus::Loading(fetch_page_stories(self.page_name, ctx.clone()));
+        }
     }
 
     fn load_comments(&mut self, item: &HnItem, ctx: &egui::Context) -> bool {
@@ -480,33 +496,24 @@ impl Application {
         loaded
     }
 
-    fn load_more(&mut self, ctx: &egui::Context) {
+    fn load_missing_page_stories(&mut self, ctx: &egui::Context) {
         if let RequestStatus::Done(item_ids) = &self.page_status {
-            self.display_stories.clear();
-
-            for &id in item_ids
-                .iter()
-                .skip(self.page_number * self.page_size)
-                .take(self.page_size)
-            {
-                self.display_stories.push(id);
+            for &id in self.displayed_page_stories(item_ids) {
                 self.item_cache
                     .entry(id)
                     .or_insert_with(|| fetch_item(ctx.clone(), id));
             }
-
-            self.page_number += 1;
         }
     }
 
-    fn load_previous(&mut self, ctx: &egui::Context) {
-        if let RequestStatus::Done(_) = &self.page_status {
-            if self.page_number > 1 {
-                // well this is bit of a hack innit
-                self.page_number -= 2;
-                self.load_more(ctx);
-            }
-        }
+    fn displayed_page_stories<'a>(
+        &self,
+        item_ids: &'a Vec<HnItemId>,
+    ) -> impl Iterator<Item = &'a HnItemId> {
+        item_ids
+            .iter()
+            .skip(self.page_number * self.page_size)
+            .take(self.page_size)
     }
 }
 
@@ -532,17 +539,12 @@ impl eframe::App for Application {
             self.refresh(&ctx);
         }
 
-        let mut just_loaded_page = false;
-
         self.page_status = match std::mem::take(&mut self.page_status) {
             RequestStatus::Done(items) => RequestStatus::Done(items),
             RequestStatus::Loading(mut promise) => {
                 if let Some(result) = promise.ready_mut() {
                     match result {
-                        Ok(resource) => {
-                            just_loaded_page = true;
-                            RequestStatus::Done(std::mem::take(resource))
-                        }
+                        Ok(resource) => RequestStatus::Done(std::mem::take(resource)),
                         Err(error) => RequestStatus::Error(std::mem::take(error)),
                     }
                 } else {
@@ -552,22 +554,22 @@ impl eframe::App for Application {
             RequestStatus::Error(error) => RequestStatus::Error(error),
         };
 
-        if just_loaded_page {
-            if self.page_number == 0 {
-                self.load_more(ctx);
-            }
-        }
-
+        self.load_missing_page_stories(ctx);
         self.load_missing_icons(ctx);
+
+        let loading_any_items = self.item_cache.iter().any(|(_, p)| p.ready().is_none());
+        let loading_stories = if let RequestStatus::Done(item_ids) = &self.page_status {
+            self.displayed_page_stories(item_ids).any(|id| {
+                self.item_cache
+                    .get(id)
+                    .map_or(false, |p| p.ready().is_none())
+            })
+        } else {
+            false
+        };
 
         let old_page = self.page_name;
         let mut go_back = false;
-
-        let loading_any_items = self.item_cache.iter().any(|(_, p)| p.ready().is_none());
-        let loading_stories = self
-            .item_cache
-            .iter()
-            .any(|(id, p)| p.ready().is_none() && self.display_stories.contains(id));
 
         egui::TopBottomPanel::top("header").show(ctx, |ui| {
             ui.horizontal(|ui| {
@@ -605,8 +607,8 @@ impl eframe::App for Application {
                         }
                     }
 
-                    let can_go_back = !matches!(self.page_status, RequestStatus::Loading(_))
-                        && (self.display_comments_for_story.is_some() || self.page_number > 1);
+                    let can_go_back =
+                        self.display_comments_for_story.is_some() || self.page_number > 0;
 
                     let text = if self.display_comments_for_story.is_some() {
                         "↩" // "leftwards arrow with hook" - for going back to page from comment section
@@ -653,8 +655,8 @@ impl eframe::App for Application {
                     }
                 } else {
                     match (&self.page_status, loading_stories) {
-                        (RequestStatus::Done(_), false) => {
-                            for story_id in &self.display_stories {
+                        (RequestStatus::Done(story_items), false) => {
+                            for story_id in self.displayed_page_stories(story_items) {
                                 if let Some(promise) = self.item_cache.get(story_id) {
                                     if let Some(result) = promise.ready() {
                                         if let Ok(story) = result {
@@ -673,7 +675,7 @@ impl eframe::App for Application {
                                     .add_enabled(!loading_any_items, egui::Button::new("Load More"))
                                     .clicked()
                                 {
-                                    self.load_more(ctx);
+                                    self.page_number += 1;
                                 }
                             });
                         }
@@ -731,14 +733,13 @@ impl eframe::App for Application {
         if go_back {
             if self.display_comments_for_story.is_some() {
                 self.display_comments_for_story = None;
-            } else if self.page_number > 1 {
-                self.load_previous(ctx);
+            } else if self.page_number > 0 {
+                self.page_number -= 1;
             }
         }
 
         if old_page != self.page_name {
             self.display_comments_for_story = None;
-            self.display_stories.clear();
             self.page_status =
                 RequestStatus::Loading(fetch_page_stories(self.page_name, ctx.clone()));
             self.page_number = 0;
