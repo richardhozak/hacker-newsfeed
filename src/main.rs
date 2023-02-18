@@ -488,6 +488,16 @@ impl Application {
             self.page_number += 1;
         }
     }
+
+    fn load_previous(&mut self, ctx: &egui::Context) {
+        if let RequestStatus::Done(_) = &self.page_status {
+            if self.page_number > 1 {
+                // well this is bit of a hack innit
+                self.page_number -= 2;
+                self.load_more(ctx);
+            }
+        }
+    }
 }
 
 enum RequestStatus {
@@ -584,13 +594,19 @@ impl eframe::App for Application {
                     }
 
                     let can_go_back = !matches!(self.page_status, RequestStatus::Loading(_))
-                        && self.display_comments_for_story.is_some();
+                        && (self.display_comments_for_story.is_some() || self.page_number > 1);
+
+                    let text = if self.display_comments_for_story.is_some() {
+                        "↩" // "leftwards arrow with hook" - for going back to page from comment section
+                    } else {
+                        "⮨" // "black curved downwards and leftwards arrow" - for going back a page
+                    };
 
                     ui.add_enabled_ui(can_go_back, |ui| {
                         if ui
                             .add_sized(
                                 [size, size],
-                                egui::Button::new(RichText::new("⮨").size(size * 0.6)),
+                                egui::Button::new(RichText::new(text).size(size * 0.6)),
                             )
                             .clicked()
                         {
@@ -701,7 +717,11 @@ impl eframe::App for Application {
         self.show_debug_window = show_debug_window;
 
         if go_back {
-            self.display_comments_for_story = None;
+            if self.display_comments_for_story.is_some() {
+                self.display_comments_for_story = None;
+            } else if self.page_number > 1 {
+                self.load_previous(ctx);
+            }
         }
 
         if old_page != self.page_name {
