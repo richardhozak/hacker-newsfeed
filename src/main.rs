@@ -26,6 +26,11 @@ pub const GO_BACK_FROM_COMMENTS: KeyboardShortcut =
     KeyboardShortcut::new(Modifiers::NONE, Key::Backspace);
 pub const GO_BACK: KeyboardShortcut = KeyboardShortcut::new(Modifiers::ALT, Key::ArrowLeft);
 pub const GO_NEXT: KeyboardShortcut = KeyboardShortcut::new(Modifiers::ALT, Key::ArrowRight);
+pub const TAB_TOP: KeyboardShortcut = KeyboardShortcut::new(Modifiers::ALT, Key::Num1);
+pub const TAB_NEW: KeyboardShortcut = KeyboardShortcut::new(Modifiers::ALT, Key::Num2);
+pub const TAB_SHOW: KeyboardShortcut = KeyboardShortcut::new(Modifiers::ALT, Key::Num3);
+pub const TAB_ASK: KeyboardShortcut = KeyboardShortcut::new(Modifiers::ALT, Key::Num4);
+pub const TAB_JOBS: KeyboardShortcut = KeyboardShortcut::new(Modifiers::ALT, Key::Num5);
 
 #[derive(Deserialize, Clone, Copy, PartialEq, Eq, Hash, Default)]
 struct HnItemId(usize);
@@ -408,6 +413,26 @@ impl eframe::App for Application {
         };
 
         let old_page = self.page_name;
+
+        if ctx.input_mut(|i| i.consume_shortcut(&TAB_TOP)) {
+            self.page_name = Page::Top;
+        }
+
+        if ctx.input_mut(|i| i.consume_shortcut(&TAB_NEW)) {
+            self.page_name = Page::New;
+        }
+
+        if ctx.input_mut(|i| i.consume_shortcut(&TAB_SHOW)) {
+            self.page_name = Page::Show;
+        }
+
+        if ctx.input_mut(|i| i.consume_shortcut(&TAB_ASK)) {
+            self.page_name = Page::Ask;
+        }
+
+        if ctx.input_mut(|i| i.consume_shortcut(&TAB_JOBS)) {
+            self.page_name = Page::Jobs;
+        }
 
         egui::TopBottomPanel::top("header").show(ctx, |ui| {
             ui.horizontal(|ui| {

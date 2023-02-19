@@ -27,7 +27,12 @@ App for reading [Hacker News](https://news.ycombinator.com/).
 - `F5` - Refresh
 - `Backspace` - Go back to story view from comment section
 - `Alt + Left Arrow` - Go back a page
-- `Alt + Right Arrow` - Got to next page (load more)
+- `Alt + Right Arrow` - Go to next page (load more)
+- `Alt + 1` - Switch to Top tab
+- `Alt + 2` - Switch to New tab
+- `Alt + 3` - Switch to Show HN tab
+- `Alt + 4` - Switch to Ask HN tab
+- `Alt + 5` - Switch to Jobs tab
 - `F12` - Debug menu
 
 ### Accessibility keyboard shortcuts
