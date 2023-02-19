@@ -1,6 +1,6 @@
 [package]
 name = "hacker-newsfeed"
-version = "1.0.0-prerelease"
+version = "1.0.0"
 authors = ["Richard Hozák"]
 edition = "2021"
 license = "MIT OR Apache-2.0"
