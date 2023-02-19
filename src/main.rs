@@ -3,11 +3,8 @@
 use std::fmt::Display;
 
 use eframe::{
-    egui::{
-        self, CollapsingHeader, Color32, FontId, Key, KeyboardShortcut, Modifiers, RichText,
-        TextFormat, TextStyle,
-    },
-    epaint::{ahash::HashMap, text::LayoutJob, Vec2},
+    egui::{self, Color32, FontId, Key, KeyboardShortcut, Modifiers, RichText, TextStyle},
+    epaint::{ahash::HashMap, Vec2},
     CreationContext,
 };
 use egui_extras::RetainedImage;
@@ -21,6 +18,7 @@ use url::Url;
 mod comment_parser;
 mod fetch_favicon;
 mod human_format;
+mod widgets;
 
 pub const DEBUG_SHORTCUT: KeyboardShortcut = KeyboardShortcut::new(Modifiers::NONE, Key::F12);
 pub const REFRESH_SHORTCUT: KeyboardShortcut = KeyboardShortcut::new(Modifiers::NONE, Key::F5);
@@ -196,20 +194,6 @@ fn configure_visuals(ctx: &egui::Context) {
     ctx.set_visuals(visuals);
 }
 
-fn rich_text_with_style(text: impl Into<String>, style: &comment_parser::TextStyle) -> RichText {
-    let mut rich_text = RichText::new(text);
-
-    if style.italic {
-        rich_text = rich_text.italics();
-    }
-
-    if style.monospace {
-        rich_text = rich_text.monospace();
-    }
-
-    rich_text
-}
-
 impl Application {
     fn new(cc: &CreationContext) -> Self {
         configure_visuals(&cc.egui_ctx);
@@ -244,34 +228,11 @@ impl Application {
     }
 
     fn render_html_text(&self, text: &str, ui: &mut egui::Ui) {
-        if !self.render_html {
+        if self.render_html {
+            widgets::html_text(text, ui);
+        } else {
             ui.label(text);
-            return;
         }
-
-        ui.horizontal_wrapped(|ui| {
-            ui.spacing_mut().item_spacing.x = 0.0;
-
-            let parser = comment_parser::Parser::new(text);
-            for (item, style) in parser {
-                match item {
-                    comment_parser::Item::Escape(c) => {
-                        ui.label(rich_text_with_style(c.to_string(), &style));
-                    }
-                    comment_parser::Item::Text(text) => {
-                        ui.label(rich_text_with_style(text, &style));
-                    }
-                    comment_parser::Item::NewLine => {
-                        ui.label("\n");
-                    }
-                    comment_parser::Item::Link(mut url, mut text) => {
-                        let url = url.to_string();
-                        let text = text.to_string();
-                        ui.hyperlink_to(rich_text_with_style(text, &style), url);
-                    }
-                }
-            }
-        });
     }
 
     fn load_missing_icons(&mut self, ctx: &egui::Context) {
@@ -289,6 +250,14 @@ impl Application {
         }
     }
 
+    fn get_favicon_or_default(&self, url: &Url) -> &RetainedImage {
+        self.favicons
+            .get(&url)
+            .and_then(|promise| promise.ready())
+            .and_then(|result| result.as_ref().ok())
+            .unwrap_or_else(|| self.default_icon.as_ref().unwrap())
+    }
+
     fn render_story(
         &self,
         story: &HnItem,
@@ -296,81 +265,17 @@ impl Application {
         show_text: bool,
         can_open_comments: bool,
     ) -> bool {
-        enum Intent {
-            OpenComments,
-            OpenLink,
-        }
-
-        let comment_link_enabled = story.descendants > 0 && can_open_comments;
-        let link_enabled = story.url.is_some() || comment_link_enabled;
-        let mut intent = None;
-
-        if let Some(url) = &story.url {
-            ui.horizontal(|ui| {
-                let icon = self
-                    .favicons
-                    .get(url)
-                    .and_then(|promise| promise.ready())
-                    .and_then(|result| result.as_ref().ok())
-                    .unwrap_or_else(|| self.default_icon.as_ref().unwrap());
-
-                let height = ui.available_height();
-                icon.show_size(ui, Vec2::new(height, height));
-
-                ui.label(RichText::new(human_format::url(url)).monospace());
-            });
-        }
-
-        let title_text = RichText::new(&story.title).heading().strong();
-        if link_enabled {
-            ui.scope(|ui| {
-                ui.visuals_mut().hyperlink_color = ui.visuals().widgets.active.fg_stroke.color;
-                if ui.link(title_text).clicked() {
-                    intent = Some(Intent::OpenLink);
-                }
-            });
-        } else {
-            ui.label(title_text);
-        };
-
-        ui.horizontal(|ui| {
-            ui.label(RichText::new(&story.by).strong());
-            ui.label("•");
-            ui.label(RichText::new(human_format::date_time(&story.time)).weak());
-        });
-
-        if show_text && story.text.len() > 0 {
-            self.render_html_text(&story.text, ui);
-        }
-
-        ui.horizontal(|ui| {
-            if let Some(points_str) = human_format::points(story.score) {
-                ui.label(&points_str);
-                ui.label("•");
-            }
-
-            ui.add_enabled_ui(comment_link_enabled, |ui| {
-                if ui
-                    .link(human_format::comment_count(story.descendants))
-                    .clicked()
-                {
-                    intent = Some(Intent::OpenComments);
-                }
-            });
-        });
-
-        // If there is url set and the intent is to open the link then open the url
-        // otherwise if whatever intent is set meaning we are able to interact, then
-        // open comments, this is so stories without url open comment section when
-        // they click the title
-        match (&story.url, intent) {
-            (Some(url), Some(Intent::OpenLink)) => {
-                ui.output_mut(|o| o.open_url(url));
-                false
-            }
-            (_, Some(_)) => true,
-            _ => false,
-        }
+        return widgets::story(
+            story,
+            ui,
+            show_text,
+            can_open_comments,
+            self.render_html,
+            story
+                .url
+                .as_ref()
+                .map(|url| self.get_favicon_or_default(url)),
+        );
     }
 
     fn render_comment(&self, comment_id: HnItemId, ui: &mut egui::Ui) {
@@ -381,63 +286,9 @@ impl Application {
 
         if let Some(result) = promise.ready() {
             match result {
-                Ok(comment) => {
-                    let mut text_layout = LayoutJob::default();
-                    if comment.by.len() > 0 {
-                        text_layout.append(
-                            &comment.by,
-                            0.0,
-                            TextFormat::simple(
-                                FontId::proportional(16.0),
-                                ui.visuals().strong_text_color(),
-                            ),
-                        );
-                        text_layout.append(
-                            "  •  ",
-                            0.0,
-                            TextFormat::simple(
-                                FontId::proportional(16.0),
-                                ui.visuals().weak_text_color(),
-                            ),
-                        );
-                    }
-                    text_layout.append(
-                        &human_format::date_time(&comment.time),
-                        0.0,
-                        TextFormat::simple(
-                            FontId::proportional(16.0),
-                            ui.visuals().weak_text_color(),
-                        ),
-                    );
-
-                    CollapsingHeader::new(text_layout)
-                        .id_source(comment.id)
-                        .default_open(true)
-                        .show(ui, |ui| {
-                            if comment.deleted {
-                                ui.label("[deleted]");
-                            } else {
-                                if !self.render_html {
-                                    if ui.small_button("Copy").clicked() {
-                                        ui.output_mut(|o| o.copied_text = comment.text.to_string());
-                                    }
-                                }
-
-                                self.render_html_text(&comment.text, ui);
-                            }
-
-                            egui::Frame::none()
-                                .outer_margin(egui::style::Margin {
-                                    left: 20f32,
-                                    ..Default::default()
-                                })
-                                .show(ui, |ui| {
-                                    for child in &comment.kids {
-                                        self.render_comment(*child, ui);
-                                    }
-                                });
-                        });
-                }
+                Ok(comment) => widgets::comment(comment, ui, self.render_html, |child_id, ui| {
+                    self.render_comment(child_id, ui)
+                }),
                 Err(error) => {
                     ui.label(format!("Error: {}", error));
                 }
