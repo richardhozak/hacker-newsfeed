@@ -1126,7 +1126,7 @@ dependencies = [
 
 [[package]]
 name = "hacker-newsfeed"
-version = "0.1.0"
+version = "1.0.0-prerelease"
 dependencies = [
  "eframe",
  "egui_extras",
