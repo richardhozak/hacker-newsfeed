@@ -11,6 +11,12 @@ App for reading [Hacker News](https://news.ycombinator.com/).
 
 </div>
 
+## Installation
+
+Download the latest release [here](https://github.com/rhzx86/hacker-newsfeed/releases/latest).
+
+Or install it from sources with `cargo install hacker-newsfeed`.
+
 ## Features
 
 - Tabs to browse Top, New, Show HN, Ask HN and Jobs stories
