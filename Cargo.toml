@@ -1,7 +1,14 @@
 [package]
 name = "hacker-newsfeed"
 version = "1.0.0-prerelease"
+authors = ["Richard Hozák"]
 edition = "2021"
+license = "MIT OR Apache-2.0"
+readme = "README.md"
+homepage = "https://github.com/rhzx86/hacker-newsfeed"
+description = "App for reading Hacker News"
+categories = ["gui", "accessibility"]
+keywords = ["hacker_news", "client", "hacker", "news", "feed"]
 
 [dependencies]
 eframe = "0.21.3"
