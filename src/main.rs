@@ -24,6 +24,10 @@ mod human_format;
 
 pub const DEBUG_SHORTCUT: KeyboardShortcut = KeyboardShortcut::new(Modifiers::NONE, Key::F12);
 pub const REFRESH_SHORTCUT: KeyboardShortcut = KeyboardShortcut::new(Modifiers::NONE, Key::F5);
+pub const GO_BACK_FROM_COMMENTS: KeyboardShortcut =
+    KeyboardShortcut::new(Modifiers::NONE, Key::Backspace);
+pub const GO_BACK: KeyboardShortcut = KeyboardShortcut::new(Modifiers::ALT, Key::ArrowLeft);
+pub const GO_NEXT: KeyboardShortcut = KeyboardShortcut::new(Modifiers::ALT, Key::ArrowRight);
 
 #[derive(Deserialize, Clone, Copy, PartialEq, Eq, Hash, Default)]
 struct HnItemId(usize);
@@ -547,12 +551,24 @@ impl Default for RequestStatus {
 
 impl eframe::App for Application {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        let mut go_back = false;
+
         if ctx.input_mut(|i| i.consume_shortcut(&DEBUG_SHORTCUT)) {
             self.show_debug_window = !self.show_debug_window;
         }
 
         if ctx.input_mut(|i| i.consume_shortcut(&REFRESH_SHORTCUT)) {
             self.refresh(&ctx);
+        }
+
+        if ctx.input_mut(|i| i.consume_shortcut(&GO_BACK)) {
+            go_back = true;
+        }
+
+        if ctx.input_mut(|i| i.consume_shortcut(&GO_BACK_FROM_COMMENTS)) {
+            if self.display_comments_for_story.is_some() {
+                go_back = true;
+            }
         }
 
         self.page_status = match std::mem::take(&mut self.page_status) {
@@ -587,7 +603,6 @@ impl eframe::App for Application {
         };
 
         let old_page = self.page_name;
-        let mut go_back = false;
 
         egui::TopBottomPanel::top("header").show(ctx, |ui| {
             ui.horizontal(|ui| {
@@ -686,6 +701,12 @@ impl eframe::App for Application {
                                     }
 
                                     ui.separator();
+                                }
+                            }
+
+                            if ctx.input_mut(|i| i.consume_shortcut(&GO_NEXT)) {
+                                if !loading {
+                                    self.page_number += 1;
                                 }
                             }
 
