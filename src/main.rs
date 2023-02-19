@@ -373,7 +373,7 @@ impl Application {
         }
     }
 
-    fn render_comment(&self, comment_id: HnItemId, ctx: &egui::Context, ui: &mut egui::Ui) {
+    fn render_comment(&self, comment_id: HnItemId, ui: &mut egui::Ui) {
         let promise = match self.item_cache.get(&comment_id) {
             Some(promise) => promise,
             None => return,
@@ -433,7 +433,7 @@ impl Application {
                                 })
                                 .show(ui, |ui| {
                                     for child in &comment.kids {
-                                        self.render_comment(*child, ctx, ui);
+                                        self.render_comment(*child, ui);
                                     }
                                 });
                         });
@@ -688,7 +688,7 @@ impl eframe::App for Application {
                         ui.separator();
 
                         for comment_id in &story.kids {
-                            self.render_comment(*comment_id, ctx, ui);
+                            self.render_comment(*comment_id, ui);
                         }
                     }
                 } else {
