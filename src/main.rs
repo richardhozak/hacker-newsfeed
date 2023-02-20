@@ -59,7 +59,7 @@ struct HnItem {
     score: usize,
     title: String,
     parts: Vec<HnItemId>,
-    descendants: usize, // comment count when type is story
+    descendants: usize, // total comment count when type is story
 }
 
 impl Default for HnItem {
@@ -626,7 +626,7 @@ fn main() -> Result<(), eframe::Error> {
     let mut native_options = eframe::NativeOptions::default();
     native_options.initial_window_size = Some(Vec2::new(520., 960.));
     eframe::run_native(
-        "Hacker News",
+        "Hacker Newsfeed",
         native_options,
         Box::new(|cc| Box::new(Application::new(cc))),
     )
