@@ -93,26 +93,6 @@ enum Page {
     Jobs,
 }
 
-#[derive(Default)]
-struct Application {
-    display_comments_for_story: Option<HnItemId>,
-
-    // items that are loaded or being loaded from api
-    item_cache: HashMap<HnItemId, Promise<ehttp::Result<HnItem>>>,
-
-    page_name: Page,    // what type of page/tab to display
-    page_number: usize, // the story/article offset of given page to display
-    page_size: usize,   // how many stories to display at once in page from page number offset
-    page_status: RequestStatus,
-
-    favicons: HashMap<Url, Promise<ehttp::Result<RetainedImage>>>,
-    default_icon: Option<RetainedImage>,
-    y_icon: Option<RetainedImage>,
-    render_html: bool,
-    show_debug_window: bool,
-    text_input: String,
-}
-
 fn configure_styles(ctx: &egui::Context) {
     use egui::FontFamily::{Monospace, Proportional};
 
@@ -154,13 +134,33 @@ fn configure_visuals(ctx: &egui::Context) {
     ctx.set_visuals(visuals);
 }
 
+struct Application {
+    display_comments_for_story: Option<HnItemId>,
+
+    // items that are loaded or being loaded from api
+    item_cache: HashMap<HnItemId, Promise<ehttp::Result<HnItem>>>,
+
+    // page state
+    page_name: Page,    // what type of page/tab to display
+    page_number: usize, // the story/article offset of given page to display
+    page_size: usize,   // how many stories to display at once in page from page number offset
+    page_status: RequestStatus,
+
+    // icons
+    favicons: HashMap<Url, Promise<ehttp::Result<RetainedImage>>>,
+    default_icon: RetainedImage,
+    y_icon: RetainedImage,
+
+    // debug
+    render_html: bool,
+    show_debug_window: bool,
+    text_input: String,
+}
+
 impl Application {
     fn new(cc: &CreationContext) -> Self {
         configure_visuals(&cc.egui_ctx);
         configure_styles(&cc.egui_ctx);
-
-        let page_status =
-            RequestStatus::Loading(fetch::page_stories(Page::Top, cc.egui_ctx.clone()));
 
         let default_icon = RetainedImage::from_image_bytes(
             "default_icon",
@@ -178,12 +178,21 @@ impl Application {
         .unwrap();
 
         Self {
-            page_status,
+            display_comments_for_story: None,
+            item_cache: Default::default(),
+            page_name: Default::default(),
+            page_number: 0,
             page_size: 15,
-            default_icon: Some(default_icon),
-            y_icon: Some(y_icon),
+            page_status: RequestStatus::Loading(fetch::page_stories(
+                Default::default(),
+                cc.egui_ctx.clone(),
+            )),
+            default_icon: default_icon,
+            y_icon: y_icon,
             render_html: true,
-            ..Default::default()
+            favicons: Default::default(),
+            show_debug_window: false,
+            text_input: String::new(),
         }
     }
 
@@ -215,7 +224,7 @@ impl Application {
             .get(&url)
             .and_then(|promise| promise.ready())
             .and_then(|result| result.as_ref().ok())
-            .unwrap_or_else(|| self.default_icon.as_ref().unwrap())
+            .unwrap_or(&self.default_icon)
     }
 
     fn render_story(
@@ -437,7 +446,7 @@ impl eframe::App for Application {
 
         egui::TopBottomPanel::top("header").show(ctx, |ui| {
             ui.horizontal(|ui| {
-                self.y_icon.as_ref().unwrap().show(ui);
+                self.y_icon.show(ui);
 
                 ui.heading(RichText::new("Hacker News").strong());
 
