@@ -8,7 +8,6 @@ use eframe::{
     CreationContext,
 };
 use egui_extras::RetainedImage;
-use fetch::{favicon, hn_item, page_stories};
 use poll_promise::Promise;
 use serde::Deserialize;
 use time::OffsetDateTime;
@@ -160,7 +159,8 @@ impl Application {
         configure_visuals(&cc.egui_ctx);
         configure_styles(&cc.egui_ctx);
 
-        let page_status = RequestStatus::Loading(page_stories(Page::Top, cc.egui_ctx.clone()));
+        let page_status =
+            RequestStatus::Loading(fetch::page_stories(Page::Top, cc.egui_ctx.clone()));
 
         let default_icon = RetainedImage::from_image_bytes(
             "default_icon",
@@ -202,7 +202,7 @@ impl Application {
                     if let Some(url) = &item.url {
                         if !self.favicons.contains_key(url) {
                             self.favicons
-                                .insert(url.clone(), favicon(ctx.clone(), url.as_str()));
+                                .insert(url.clone(), fetch::favicon(ctx.clone(), url.as_str()));
                         }
                     }
                 }
@@ -273,7 +273,8 @@ impl Application {
             self.remove_item_with_kids(story_id);
         } else {
             self.item_cache.clear();
-            self.page_status = RequestStatus::Loading(page_stories(self.page_name, ctx.clone()));
+            self.page_status =
+                RequestStatus::Loading(fetch::page_stories(self.page_name, ctx.clone()));
         }
     }
 
@@ -283,7 +284,7 @@ impl Application {
         for &kid in &item.kids {
             let promise = match self.item_cache.remove(&kid) {
                 Some(promise) => promise,
-                None => hn_item(ctx.clone(), kid),
+                None => fetch::hn_item(ctx.clone(), kid),
             };
 
             if let Some(result) = promise.ready() {
@@ -324,7 +325,7 @@ impl Application {
             for &id in self.displayed_page_stories(item_ids) {
                 self.item_cache
                     .entry(id)
-                    .or_insert_with(|| hn_item(ctx.clone(), id));
+                    .or_insert_with(|| fetch::hn_item(ctx.clone(), id));
             }
         }
     }
@@ -612,7 +613,8 @@ impl eframe::App for Application {
 
         if old_page != self.page_name {
             self.display_comments_for_story = None;
-            self.page_status = RequestStatus::Loading(page_stories(self.page_name, ctx.clone()));
+            self.page_status =
+                RequestStatus::Loading(fetch::page_stories(self.page_name, ctx.clone()));
             self.page_number = 0;
             ctx.request_repaint();
         }
